@@ -1,124 +1,86 @@
-import React from 'react';
-import { Card } from '@/components/ui/Card';
+import Link from 'next/link';
+import { ArrowRight, CircleDollarSign, ShieldCheck } from 'lucide-react';
 import { Badge } from '@/components/ui/Badge';
 import { Table } from '@/components/ui/Table';
 
-// Demo summary data (cents are converted to dollars for display)
-const summary = {
-  totalTransactions: 5,
-  authorizedCents: 350000, // $3,500.00
-  capturedCents: 300000, // $3,000.00
-  pendingCents: 50000, // $500.00
-};
-
-// Demo transaction list
-const transactions = [
-  {
-    id: 'TX001',
-    project: 'Website Redesign',
-    buyer: 'Acme Corp',
-    amountCents: 250000,
-    orderId: 'ORD-12345',
-    authStatus: 'AUTHORIZED',
-    captureStatus: 'CAPTURED',
-  },
-  {
-    id: 'TX002',
-    project: 'Mobile App MVP',
-    buyer: 'Beta Ltd',
-    amountCents: 50000,
-    orderId: 'ORD-67890',
-    authStatus: 'APPROVED',
-    captureStatus: 'AUTHORIZED',
-  },
-  {
-    id: 'TX003',
-    project: 'Logo Design',
-    buyer: 'Gamma Studios',
-    amountCents: 30000,
-    orderId: 'ORD-11223',
-    authStatus: 'CREATED',
-    captureStatus: 'FAILED',
-  },
-  {
-    id: 'TX004',
-    project: 'Content Writing',
-    buyer: 'Delta Media',
-    amountCents: 20000,
-    orderId: 'ORD-44556',
-    authStatus: 'VOIDED',
-    captureStatus: 'VOIDED',
-  },
-  {
-    id: 'TX005',
-    project: 'SEO Optimization',
-    buyer: 'Epsilon LLC',
-    amountCents: 50000,
-    orderId: 'ORD-77889',
-    authStatus: 'APPROVED',
-    captureStatus: 'PENDING', // custom status for demo
-  },
+const paymentStages = [
+  { name: 'Agreement approved', description: 'Both parties approve the amendment.' },
+  { name: 'Payment authorized', description: 'The payer authorizes the agreed amount.' },
+  { name: 'Capture or void', description: 'Capture follows fulfillment; unused authorizations may be voided.' },
 ];
-
-// Helper to format cents → $d.cc
-const formatCents = (cents: number) => `$${(cents / 100).toFixed(2)}`;
-
-// Map badge variant per status
-const statusVariant: Record<string, 'success' | 'warning' | 'danger' | 'info'> = {
-  CREATED: 'info',
-  APPROVED: 'info',
-  AUTHORIZED: 'success',
-  CAPTURED: 'success',
-  VOIDED: 'warning',
-  FAILED: 'danger',
-  PENDING: 'info',
-};
 
 export default function PaymentsPage() {
   return (
-    <section className="space-y-8">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Payments</h1>
+    <section className="mp-page mx-auto w-full max-w-7xl space-y-8">
+      <header className="flex flex-col justify-between gap-5 border-b border-mp-warm-grey pb-6 sm:flex-row sm:items-end">
+        <div>
+          <p className="mp-kicker">Financial operations</p>
+          <h1 className="mp-page-title mt-2">Payments</h1>
+          <p className="mp-copy mt-3 max-w-2xl">
+            Review authorization and settlement records associated with approved agreements.
+          </p>
+        </div>
+        <Badge variant="info">No live payment records</Badge>
+      </header>
 
-      {/* Summary cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card title="Total Transactions" value={summary.totalTransactions} />
-        <Card title="Authorized Amount" value={formatCents(summary.authorizedCents)} />
-        <Card title="Captured Amount" value={formatCents(summary.capturedCents)} />
-        <Card title="Pending Payments" value={formatCents(summary.pendingCents)} />
-      </div>
+      <section aria-labelledby="payment-register-heading">
+        <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <p className="mp-kicker">Transaction register</p>
+            <h2 id="payment-register-heading" className="mt-1 text-xl font-semibold">
+              Payment activity
+            </h2>
+          </div>
+          <span className="text-sm text-mp-medium-grey">No transactions loaded</span>
+        </div>
+        <Table
+          caption="Payment transaction records"
+          headers={['Payment', 'Agreement', 'Amount', 'Authorization', 'Settlement']}
+          rows={[]}
+          emptyMessage="Payment records will appear here when the payment integration is connected."
+        />
+      </section>
 
-      {/* Transactions table */}
-      <Table
-        headers={[
-          'Transaction ID',
-          'Project',
-          'Buyer',
-          'Amount',
-          'PayPal Order ID',
-          'Auth Status',
-          'Capture Status',
-        ]}
-        rows={transactions.map((t) => [
-          t.id,
-          t.project,
-          t.buyer,
-          formatCents(t.amountCents),
-          t.orderId,
-          <Badge key={`auth-${t.id}`} variant={statusVariant[t.authStatus] || 'info'}>{t.authStatus}</Badge>,
-          <Badge key={`capture-${t.id}`} variant={statusVariant[t.captureStatus] || 'info'}>{t.captureStatus}</Badge>,
-        ])}
-      />
+      <section className="grid gap-8 border-t border-mp-warm-grey pt-8 lg:grid-cols-[minmax(0,1.2fr)_minmax(16rem,0.8fr)]">
+        <div>
+          <div className="flex items-center gap-3">
+            <CircleDollarSign size={22} className="text-mp-orange" aria-hidden="true" />
+            <h2 className="text-xl font-semibold">Payment lifecycle</h2>
+          </div>
+          <ol className="mt-5 border-y border-mp-warm-grey bg-mp-surface sm:grid sm:grid-cols-3">
+            {paymentStages.map((stage, index) => (
+              <li
+                key={stage.name}
+                className="border-b border-mp-warm-grey p-4 last:border-0 sm:border-b-0 sm:border-r sm:last:border-r-0"
+              >
+                <span className="font-mono text-sm text-mp-medium-grey">0{index + 1}</span>
+                <h3 className="mt-3 font-semibold">{stage.name}</h3>
+                <p className="mp-copy mt-1 text-sm">{stage.description}</p>
+              </li>
+            ))}
+          </ol>
+          <p className="mt-3 text-sm text-mp-medium-grey">
+            Lifecycle description only. PayPal payment execution is not implemented yet.
+          </p>
+        </div>
 
-      {/* Transaction detail placeholder */}
-      <div className="mt-8 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700">
-        <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">Transaction Detail (Demo)</h2>
-        <p className="text-gray-700 dark:text-gray-300">
-          Select a transaction to view full details. (Static placeholder showing first transaction.)
-        </p>
-        <pre className="mt-2 whitespace-pre-wrap text-sm text-gray-600 dark:text-gray-400">
-{JSON.stringify(transactions[0], null, 2)}
-        </pre>
-      </div>
+        <aside className="border-l-2 border-mp-orange pl-5">
+          <div className="flex items-center gap-3">
+            <ShieldCheck size={21} className="text-mp-orange" aria-hidden="true" />
+            <h2 className="text-lg font-semibold">Payment integrity</h2>
+          </div>
+          <p className="mp-copy mt-3">
+            The product brief calls for integer-cent amounts and server-calculated payment values.
+            No payment endpoints or payment records are currently available.
+          </p>
+          <Link
+            href="/amendments"
+            className="mt-5 inline-flex min-h-10 items-center gap-2 font-semibold text-mp-ink underline decoration-mp-orange decoration-2 underline-offset-4 hover:text-mp-medium-grey focus-visible:outline focus-visible:outline-2 focus-visible:outline-mp-orange"
+          >
+            View amendments <ArrowRight size={16} aria-hidden="true" />
+          </Link>
+        </aside>
+      </section>
     </section>
   );
 }

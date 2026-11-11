@@ -5,16 +5,18 @@ interface BadgeProps {
   children: React.ReactNode;
 }
 
-export const Badge: React.FC<BadgeProps> = ({ variant = 'info', children }) => {
-  const colors = {
-    success: 'bg-emerald-100 text-emerald-800',
-    warning: 'bg-yellow-100 text-yellow-800',
-    danger: 'bg-red-100 text-red-800',
-    info: 'bg-gray-100 text-gray-800',
-  };
-  return (
-    <span className={`inline-block px-2 py-1 rounded text-xs font-medium ${colors[variant]}`}>
-      {children}
-    </span>
-  );
+const badgeStyles: Record<NonNullable<BadgeProps['variant']>, string> = {
+  success: 'border-mp-orange bg-mp-surface text-mp-ink',
+  warning: 'border-mp-warm-grey bg-mp-app-bg text-mp-medium-grey',
+  danger: 'border-mp-ink bg-mp-ink text-white',
+  info: 'border-mp-warm-grey bg-mp-surface text-mp-medium-grey',
 };
+
+export const Badge: React.FC<BadgeProps> = ({ variant = 'info', children }) => (
+  <span
+    className={`inline-flex items-center gap-2 border px-2 py-1 text-xs font-semibold ${badgeStyles[variant]}`}
+  >
+    {variant === 'success' ? <span className="h-1.5 w-1.5 bg-mp-orange" aria-hidden="true" /> : null}
+    {children}
+  </span>
+);

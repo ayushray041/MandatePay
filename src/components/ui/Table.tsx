@@ -3,33 +3,52 @@ import React from 'react';
 interface TableProps {
   headers: string[];
   rows: (React.ReactNode | string | number)[][];
+  caption: string;
+  emptyMessage?: string;
 }
 
-export const Table: React.FC<TableProps> = ({ headers, rows }) => (
-  <div className="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
-    <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-      <thead className="bg-gray-50 dark:bg-gray-800">
-        <tr>
-          {headers.map((h, i) => (
+export const Table: React.FC<TableProps> = ({
+  headers,
+  rows,
+  caption,
+  emptyMessage = 'No records available.',
+}) => (
+  <div className="overflow-x-auto border-y border-mp-warm-grey">
+    <table aria-label={caption} className="w-full min-w-[42rem] border-collapse text-left">
+      <thead className="bg-mp-app-bg">
+        <tr className="border-b border-mp-warm-grey">
+          {headers.map((header) => (
             <th
-              key={i}
-              className="px-4 py-2 text-left text-sm font-medium text-gray-500 dark:text-gray-300"
+              key={header}
+              scope="col"
+              className="px-4 py-3 text-xs font-semibold uppercase tracking-wide text-mp-medium-grey"
             >
-              {h}
+              {header}
             </th>
           ))}
         </tr>
       </thead>
-      <tbody className="bg-white dark:bg-gray-900">
-        {rows.map((row, ri) => (
-          <tr key={ri} className="odd:bg-gray-50 dark:odd:bg-gray-800">
-            {row.map((cell, ci) => (
-              <td key={ci} className="px-4 py-2 text-sm text-gray-700 dark:text-gray-200">
-                {cell}
-              </td>
-            ))}
+      <tbody className="bg-mp-surface">
+        {rows.length ? (
+          rows.map((row, rowIndex) => (
+            <tr key={rowIndex} className="border-b border-mp-warm-grey last:border-0">
+              {row.map((cell, cellIndex) => (
+                <td key={cellIndex} className="px-4 py-3 text-sm text-mp-ink">
+                  {cell}
+                </td>
+              ))}
+            </tr>
+          ))
+        ) : (
+          <tr>
+            <td
+              colSpan={headers.length}
+              className="px-4 py-12 text-center text-sm text-mp-medium-grey"
+            >
+              {emptyMessage}
+            </td>
           </tr>
-        ))}
+        )}
       </tbody>
     </table>
   </div>
