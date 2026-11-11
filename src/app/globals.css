@@ -7,6 +7,18 @@
   --mp-medium-grey: #646368;
   --mp-ink: #231F20;
   --mp-surface: #FFFFFF;
+  --mp-font-display: Arial, Helvetica, sans-serif;
+  --mp-font-body: Arial, Helvetica, sans-serif;
+  --mp-text-xs: 0.75rem;
+  --mp-text-sm: 0.875rem;
+  --mp-text-base: 1rem;
+  --mp-text-lg: 1.125rem;
+  --mp-text-xl: 1.25rem;
+  --mp-text-2xl: 1.5rem;
+  --mp-text-3xl: 1.875rem;
+  --mp-text-4xl: 2.25rem;
+  --mp-leading-body: 1.6;
+  --mp-leading-heading: 1.12;
 }
 
 @theme inline {
@@ -16,11 +28,59 @@
   --color-mp-medium-grey: var(--mp-medium-grey);
   --color-mp-ink: var(--mp-ink);
   --color-mp-surface: var(--mp-surface);
-  --font-sans: Arial, Helvetica, sans-serif;
+  --font-sans: var(--mp-font-body);
+  --font-display: var(--mp-font-display);
+  --text-mp-xs: var(--mp-text-xs);
+  --text-mp-sm: var(--mp-text-sm);
+  --text-mp-base: var(--mp-text-base);
+  --text-mp-lg: var(--mp-text-lg);
+  --text-mp-xl: var(--mp-text-xl);
+  --text-mp-2xl: var(--mp-text-2xl);
+  --text-mp-3xl: var(--mp-text-3xl);
+  --text-mp-4xl: var(--mp-text-4xl);
 }
 
 body {
   background: var(--mp-app-bg);
   color: var(--mp-ink);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--mp-font-body);
+  font-size: var(--mp-text-base);
+  line-height: var(--mp-leading-body);
+}
+
+.mp-display {
+  font-family: var(--mp-font-display);
+  font-size: clamp(2.5rem, 6vw, 4.75rem);
+  font-weight: 700;
+  letter-spacing: -0.055em;
+  line-height: 1;
+}
+
+.mp-page-title {
+  font-family: var(--mp-font-display);
+  font-size: clamp(1.875rem, 3.5vw, 2.75rem);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: var(--mp-leading-heading);
+}
+
+.mp-section-title {
+  font-family: var(--mp-font-display);
+  font-size: clamp(1.5rem, 2.5vw, 2rem);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: var(--mp-leading-heading);
+}
+
+.mp-kicker {
+  color: var(--mp-medium-grey);
+  font-size: var(--mp-text-xs);
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.mp-copy {
+  color: var(--mp-medium-grey);
+  line-height: var(--mp-leading-body);
 }
