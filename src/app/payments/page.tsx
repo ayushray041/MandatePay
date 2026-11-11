@@ -104,8 +104,8 @@ export default function PaymentsPage() {
           t.buyer,
           formatCents(t.amountCents),
           t.orderId,
-          <Badge variant={statusVariant[t.authStatus] || 'info'}>{t.authStatus}</Badge>,
-          <Badge variant={statusVariant[t.captureStatus] || 'info'}>{t.captureStatus}</Badge>,
+          <Badge key={`auth-${t.id}`} variant={statusVariant[t.authStatus] || 'info'}>{t.authStatus}</Badge>,
+          <Badge key={`capture-${t.id}`} variant={statusVariant[t.captureStatus] || 'info'}>{t.captureStatus}</Badge>,
         ])}
       />
 
