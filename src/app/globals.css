@@ -48,6 +48,27 @@ body {
   line-height: var(--mp-leading-body);
 }
 
+*:focus-visible {
+  outline: 2px solid var(--mp-orange);
+  outline-offset: 3px;
+}
+
+.mp-skip-link {
+  position: absolute;
+  z-index: 50;
+  top: 0.75rem;
+  left: 0.75rem;
+  transform: translateY(-160%);
+  background: var(--mp-ink);
+  padding: 0.75rem 1rem;
+  color: var(--mp-surface);
+  font-weight: 700;
+}
+
+.mp-skip-link:focus {
+  transform: translateY(0);
+}
+
 .mp-page {
   min-width: 0;
   background: var(--mp-app-bg);
@@ -140,4 +161,15 @@ body {
 .mp-copy {
   color: var(--mp-medium-grey);
   line-height: var(--mp-leading-body);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }

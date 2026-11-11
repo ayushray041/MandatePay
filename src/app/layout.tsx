@@ -14,6 +14,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" className="min-h-full">
       <body className="flex min-h-dvh flex-col bg-mp-app-bg text-mp-ink">
+        <a className="mp-skip-link" href="#main-content">
+          Skip to main content
+        </a>
         <Header />
         <div className="flex min-h-0 flex-1">
           <Sidebar />
