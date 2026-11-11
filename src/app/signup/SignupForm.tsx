@@ -79,54 +79,58 @@ export function SignupForm() {
       {error && <p className="text-red-600">{error}</p>}
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300" htmlFor="fullName">
+          <label className="mp-label" htmlFor="fullName">
             Full Name
           </label>
           <input
             id="fullName"
             name="fullName"
             type="text"
+            autoComplete="name"
             required
-            className="mt-1 p-2 block w-full border rounded"
+            className="mp-input mt-1"
             disabled={loading}
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300" htmlFor="email">
+          <label className="mp-label" htmlFor="email">
             Email
           </label>
           <input
             id="email"
             name="email"
             type="email"
+            autoComplete="email"
             required
-            className="mt-1 p-2 block w-full border rounded"
+            className="mp-input mt-1"
             disabled={loading}
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300" htmlFor="password">
+          <label className="mp-label" htmlFor="password">
             Password
           </label>
           <input
             id="password"
             name="password"
             type="password"
+            autoComplete="new-password"
             required
-            className="mt-1 p-2 block w-full border rounded"
+            className="mp-input mt-1"
             disabled={loading}
           />
         </div>
         <div>
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300" htmlFor="confirmPassword">
+          <label className="mp-label" htmlFor="confirmPassword">
             Confirm Password
           </label>
           <input
             id="confirmPassword"
             name="confirmPassword"
             type="password"
+            autoComplete="new-password"
             required
-            className="mt-1 p-2 block w-full border rounded"
+            className="mp-input mt-1"
             disabled={loading}
           />
         </div>

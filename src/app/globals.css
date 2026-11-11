@@ -71,6 +71,40 @@ body {
   background: var(--mp-surface);
 }
 
+.mp-label {
+  display: block;
+  color: var(--mp-ink);
+  font-size: var(--mp-text-sm);
+  font-weight: 600;
+}
+
+.mp-input {
+  display: block;
+  width: 100%;
+  min-height: 2.75rem;
+  border: 1px solid var(--mp-warm-grey);
+  border-radius: 0.375rem;
+  background: var(--mp-surface);
+  padding: 0.625rem 0.75rem;
+  color: var(--mp-ink);
+}
+
+.mp-input::placeholder {
+  color: var(--mp-medium-grey);
+}
+
+.mp-input:focus-visible {
+  border-color: var(--mp-orange);
+  outline: 2px solid var(--mp-orange);
+  outline-offset: 2px;
+}
+
+.mp-input:disabled {
+  background: var(--mp-app-bg);
+  color: var(--mp-medium-grey);
+  cursor: not-allowed;
+}
+
 .mp-display {
   font-family: var(--mp-font-display);
   font-size: clamp(2.5rem, 6vw, 4.75rem);
