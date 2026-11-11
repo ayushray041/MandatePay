@@ -4,6 +4,9 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { z } from 'zod';
 import { login, getIdToken } from '@/lib/firebase/auth-client';
+import Link from 'next/link';
+import { ArrowRight, LockKeyhole } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
 
 const schema = z.object({
   email: z.string().email('Invalid email'),
@@ -63,46 +66,78 @@ export function LoginForm() {
   };
 
   return (
-    <section className="max-w-md mx-auto space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Log In</h1>
-      {error && <p className="text-red-600">{error}</p>}
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="mp-label" htmlFor="email">
-            Email
-          </label>
-          <input
-            id="email"
-            name="email"
-            type="email"
-            autoComplete="email"
-            required
-            className="mp-input mt-1"
-            disabled={loading}
-          />
+    <section className="mx-auto grid w-full max-w-5xl border border-mp-warm-grey bg-mp-surface md:grid-cols-[0.9fr_1.1fr]">
+      <div className="flex flex-col justify-between bg-mp-ink p-7 text-white sm:p-10">
+        <Link href="/" className="text-sm font-semibold text-white hover:text-mp-app-bg">
+          MandatePay
+        </Link>
+        <div className="my-12">
+          <div className="mb-6 inline-flex border border-mp-medium-grey p-3 text-mp-orange">
+            <LockKeyhole size={22} aria-hidden="true" />
+          </div>
+          <p className="mp-kicker text-mp-warm-grey">Workspace access</p>
+          <h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">Welcome back.</h1>
+          <p className="mt-4 max-w-sm leading-7 text-mp-app-bg">
+            Sign in to continue to your agreements, negotiations, and payment workspace.
+          </p>
         </div>
-        <div>
-          <label className="mp-label" htmlFor="password">
-            Password
-          </label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            required
-            className="mp-input mt-1"
-            disabled={loading}
-          />
+        <p className="text-sm text-mp-warm-grey">MandatePay · Agent-to-agent commerce</p>
+      </div>
+
+      <div className="p-6 sm:p-10">
+        <div className="mb-8">
+          <p className="mp-kicker">Account</p>
+          <h2 className="mp-section-title mt-2">Sign in</h2>
+          <p className="mp-copy mt-2">Enter the email and password associated with your account.</p>
         </div>
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full bg-emerald-600 text-white py-2 rounded hover:bg-emerald-700"
-        >
-          {loading ? 'Signing in...' : 'Sign In'}
-        </button>
-      </form>
+        {error && (
+          <p className="mb-5 border-l-2 border-mp-orange bg-mp-app-bg px-3 py-2 text-sm text-mp-ink" role="alert">
+            {error}
+          </p>
+        )}
+        <form onSubmit={handleSubmit} className="space-y-5">
+          <div>
+            <label className="mp-label" htmlFor="email">
+              Email
+            </label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              required
+              className="mp-input mt-1"
+              disabled={loading}
+            />
+          </div>
+          <div>
+            <label className="mp-label" htmlFor="password">
+              Password
+            </label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="current-password"
+              required
+              className="mp-input mt-1"
+              disabled={loading}
+            />
+          </div>
+          <Button type="submit" disabled={loading} className="min-h-12 w-full">
+            {loading ? 'Signing in...' : 'Sign in'} <ArrowRight size={17} aria-hidden="true" />
+          </Button>
+        </form>
+        <p className="mt-7 border-t border-mp-warm-grey pt-5 text-sm text-mp-medium-grey">
+          New to MandatePay?{' '}
+          <Link
+            href="/signup"
+            className="font-semibold text-mp-ink underline decoration-mp-orange decoration-2 underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-mp-orange"
+          >
+            Create an account
+          </Link>
+        </p>
+      </div>
     </section>
   );
 }

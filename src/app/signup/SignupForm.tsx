@@ -4,6 +4,9 @@ import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { z } from 'zod';
 import { register, getIdToken } from '@/lib/firebase/auth-client';
+import Link from 'next/link';
+import { ArrowRight, FileCheck2 } from 'lucide-react';
+import { Button } from '@/components/ui/Button';
 
 const schema = z
   .object({
@@ -74,74 +77,108 @@ export function SignupForm() {
   };
 
   return (
-    <section className="max-w-md mx-auto space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Sign Up</h1>
-      {error && <p className="text-red-600">{error}</p>}
-      <form onSubmit={handleSubmit} className="space-y-4">
-        <div>
-          <label className="mp-label" htmlFor="fullName">
-            Full Name
-          </label>
-          <input
-            id="fullName"
-            name="fullName"
-            type="text"
-            autoComplete="name"
-            required
-            className="mp-input mt-1"
-            disabled={loading}
-          />
+    <section className="mx-auto grid w-full max-w-5xl border border-mp-warm-grey bg-mp-surface md:grid-cols-[0.9fr_1.1fr]">
+      <div className="flex flex-col justify-between bg-mp-ink p-7 text-white sm:p-10">
+        <Link href="/" className="text-sm font-semibold text-white hover:text-mp-app-bg">
+          MandatePay
+        </Link>
+        <div className="my-12">
+          <div className="mb-6 inline-flex border border-mp-medium-grey p-3 text-mp-orange">
+            <FileCheck2 size={22} aria-hidden="true" />
+          </div>
+          <p className="mp-kicker text-mp-warm-grey">Start with agreement</p>
+          <h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
+            Set up your account.
+          </h1>
+          <p className="mt-4 max-w-sm leading-7 text-mp-app-bg">
+            Bring the terms, people, and approvals that shape a working agreement into focus.
+          </p>
         </div>
-        <div>
-          <label className="mp-label" htmlFor="email">
-            Email
-          </label>
-          <input
-            id="email"
-            name="email"
-            type="email"
-            autoComplete="email"
-            required
-            className="mp-input mt-1"
-            disabled={loading}
-          />
+        <p className="text-sm text-mp-warm-grey">MandatePay · Agent-to-agent commerce</p>
+      </div>
+
+      <div className="p-6 sm:p-10">
+        <div className="mb-8">
+          <p className="mp-kicker">New account</p>
+          <h2 className="mp-section-title mt-2">Create your account</h2>
+          <p className="mp-copy mt-2">Add your details to get started.</p>
         </div>
-        <div>
-          <label className="mp-label" htmlFor="password">
-            Password
-          </label>
-          <input
-            id="password"
-            name="password"
-            type="password"
-            autoComplete="new-password"
-            required
-            className="mp-input mt-1"
-            disabled={loading}
-          />
-        </div>
-        <div>
-          <label className="mp-label" htmlFor="confirmPassword">
-            Confirm Password
-          </label>
-          <input
-            id="confirmPassword"
-            name="confirmPassword"
-            type="password"
-            autoComplete="new-password"
-            required
-            className="mp-input mt-1"
-            disabled={loading}
-          />
-        </div>
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full bg-emerald-600 text-white py-2 rounded hover:bg-emerald-700"
-        >
-          {loading ? 'Creating...' : 'Create Account'}
-        </button>
-      </form>
+        {error && (
+          <p className="mb-5 border-l-2 border-mp-orange bg-mp-app-bg px-3 py-2 text-sm text-mp-ink" role="alert">
+            {error}
+          </p>
+        )}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="mp-label" htmlFor="fullName">
+              Full name
+            </label>
+            <input
+              id="fullName"
+              name="fullName"
+              type="text"
+              autoComplete="name"
+              required
+              className="mp-input mt-1"
+              disabled={loading}
+            />
+          </div>
+          <div>
+            <label className="mp-label" htmlFor="email">
+              Email
+            </label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              required
+              className="mp-input mt-1"
+              disabled={loading}
+            />
+          </div>
+          <div>
+            <label className="mp-label" htmlFor="password">
+              Password
+            </label>
+            <input
+              id="password"
+              name="password"
+              type="password"
+              autoComplete="new-password"
+              required
+              className="mp-input mt-1"
+              disabled={loading}
+            />
+          </div>
+          <div>
+            <label className="mp-label" htmlFor="confirmPassword">
+              Confirm password
+            </label>
+            <input
+              id="confirmPassword"
+              name="confirmPassword"
+              type="password"
+              autoComplete="new-password"
+              required
+              className="mp-input mt-1"
+              disabled={loading}
+            />
+          </div>
+          <Button type="submit" disabled={loading} className="min-h-12 w-full">
+            {loading ? 'Creating...' : 'Create account'} <ArrowRight size={17} aria-hidden="true" />
+          </Button>
+        </form>
+        <p className="mt-7 border-t border-mp-warm-grey pt-5 text-sm text-mp-medium-grey">
+          Already have an account?{' '}
+          <Link
+            href="/login"
+            className="font-semibold text-mp-ink underline decoration-mp-orange decoration-2 underline-offset-4 focus-visible:outline focus-visible:outline-2 focus-visible:outline-mp-orange"
+          >
+            Sign in
+          </Link>
+        </p>
+      </div>
     </section>
   );
 }
