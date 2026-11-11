@@ -1,4 +1,4 @@
-
+import './globals.css';
 import { AuthProvider } from '@/components/providers/AuthProvider';
 import type { Metadata } from 'next';
 import { Header } from '@/components/layout/Header';
@@ -17,7 +17,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <Header />
         <div className="flex flex-1">
           <Sidebar />
-          <main className="flex-1 container mx-auto px-4 py-6 overflow-y-auto">
+          <main className="min-w-0 flex-1 container mx-auto px-4 py-6 overflow-y-auto">
         <AuthProvider>{children}</AuthProvider>
           </main>
         </div>
