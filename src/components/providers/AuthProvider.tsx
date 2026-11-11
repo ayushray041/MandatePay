@@ -1,5 +1,17 @@
-import React, { createContext, useContext, useEffect, useState, type ReactNode } from "react";
-import { onAuthStateChanged, getCurrentUser, getIdToken, logout as firebaseLogout } from '@/lib/firebase/auth-client';
+'use client';
+
+import {
+  createContext,
+  useContext,
+  useState,
+  useEffect,
+  type ReactNode,
+} from 'react';
+import {
+  onAuthStateChanged,
+  getIdToken,
+  logout as firebaseLogout,
+} from '@/lib/firebase/auth-client';
 import type { User } from 'firebase/auth';
 
 interface AuthContextProps {
@@ -16,16 +28,18 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // onAuthStateChanged works only in browser; guard for SSR.
     if (typeof window === 'undefined') {
-      setLoading(false);
       return;
     }
-    const unsubscribe = onAuthStateChanged((u) => {
-      setUser(u);
+
+    const unsubscribe = onAuthStateChanged((nextUser) => {
+      setUser(nextUser);
       setLoading(false);
     });
-    return () => unsubscribe();
+
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   const handleLogout = async () => {
@@ -46,7 +60,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 };
 
 export const useAuth = () => {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within an AuthProvider');
-  return ctx;
+  const context = useContext(AuthContext);
+
+  if (!context) {
+    throw new Error('useAuth must be used within an AuthProvider');
+  }
+
+  return context;
 };

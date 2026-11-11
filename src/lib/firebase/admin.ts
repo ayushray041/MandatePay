@@ -1,20 +1,26 @@
-// src/lib/firebase/admin.ts
 // Server‑only Firebase Admin SDK initialization.
 // This module must never be imported from client‑side code.
 
-import { initializeApp, getApps, applicationDefault, App } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
-import { getFirestore } from 'firebase-admin/firestore';
+import { initializeApp, getApps, getApp, applicationDefault } from 'firebase-admin/app';
+import { getAuth, type Auth } from 'firebase-admin/auth';
+import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 
-// Guard against duplicate initialization (important in dev hot‑reload).
-if (!getApps().length) {
-  initializeApp({
-    credential: applicationDefault(),
-    // Optional: specify the project ID if available.
-    projectId: process.env.FIREBASE_PROJECT_ID,
-  });
+function getAdminApp() {
+  try {
+    if (getApps().length > 0) {
+      return getApp();
+    }
+
+    return initializeApp({
+      credential: applicationDefault(),
+      projectId: process.env.FIREBASE_PROJECT_ID || process.env.GCLOUD_PROJECT,
+    });
+  } catch (error) {
+    console.warn('Firebase Admin SDK could not initialize. Check Firebase credentials and environment variables.', error);
+    return undefined;
+  }
 }
 
-export const adminApp: App = getApps()[0];
-export const adminAuth = getAuth(adminApp);
-export const adminFirestore = getFirestore(adminApp);
+export const adminApp = getAdminApp();
+export const adminAuth: Auth | null = adminApp ? getAuth(adminApp) : null;
+export const adminFirestore: Firestore | null = adminApp ? getFirestore(adminApp) : null;

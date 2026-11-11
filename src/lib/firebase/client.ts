@@ -1,13 +1,12 @@
-import { initializeApp, getApps, FirebaseApp } from 'firebase/app';
-import { getAuth, Auth } from 'firebase/auth';
-import { getFirestore, Firestore } from 'firebase/firestore';
+import { initializeApp, getApps, getApp, type FirebaseApp } from 'firebase/app';
+import { getAuth, type Auth } from 'firebase/auth';
+import { getFirestore, type Firestore } from 'firebase/firestore';
 
 // Lazy, guarded initialization of Firebase client SDK.
-// Returns undefined if required env vars are missing – avoids runtime errors in production builds where the vars may be injected later.
+// Returns undefined if required env vars are missing to avoid runtime crashes during server renders.
 export function getFirebaseApp(): FirebaseApp | undefined {
   if (getApps().length) {
-    // Assume the first app is the one we need.
-    return getApps()[0];
+    return getApp();
   }
 
   const {
@@ -20,8 +19,6 @@ export function getFirebaseApp(): FirebaseApp | undefined {
   } = process.env;
 
   if (!NEXT_PUBLIC_FIREBASE_API_KEY || !NEXT_PUBLIC_FIREBASE_PROJECT_ID) {
-    // Env vars not present – do not initialize.
-    // This warning is safe for production; it will be removed once env vars are provided.
     console.warn('Firebase client environment variables missing – client SDK not initialized.');
     return undefined;
   }
@@ -36,7 +33,6 @@ export function getFirebaseApp(): FirebaseApp | undefined {
   });
 }
 
-// Export ready‑to‑use instances (or undefined if initialization failed).
 export const firebaseApp = getFirebaseApp();
 export const auth: Auth | undefined = firebaseApp ? getAuth(firebaseApp) : undefined;
 export const firestore: Firestore | undefined = firebaseApp ? getFirestore(firebaseApp) : undefined;
