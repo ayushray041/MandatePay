@@ -48,6 +48,29 @@ body {
   line-height: var(--mp-leading-body);
 }
 
+.mp-page {
+  min-width: 0;
+  background: var(--mp-app-bg);
+}
+
+.mp-panel {
+  border: 1px solid var(--mp-warm-grey);
+  background: var(--mp-surface);
+}
+
+.mp-divider {
+  border-color: var(--mp-warm-grey);
+}
+
+.mp-muted {
+  color: var(--mp-medium-grey);
+}
+
+.mp-empty-state {
+  border: 1px dashed var(--mp-warm-grey);
+  background: var(--mp-surface);
+}
+
 .mp-display {
   font-family: var(--mp-font-display);
   font-size: clamp(2.5rem, 6vw, 4.75rem);
