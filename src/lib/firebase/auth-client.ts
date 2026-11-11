@@ -1,25 +1,13 @@
 // src/lib/firebase/auth-client.ts
-import { firebaseApp, getFirebaseApp } from '@/lib/firebase/client';
+import { getFirebaseAuth } from '@/lib/firebase/client';
 import {
-  getAuth,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
   onAuthStateChanged as firebaseOnAuthStateChanged,
   updateProfile,
-  type Auth,
   type User,
 } from 'firebase/auth';
-
-/** Get the initialized Auth instance, throwing if Firebase is not configured. */
-function getFirebaseAuth(): Auth {
-  const app = firebaseApp ?? getFirebaseApp();
-  if (!app) {
-    throw new Error('Firebase app is not initialized. Check NEXT_PUBLIC_FIREBASE_* environment variables.');
-  }
-
-  return getAuth(app);
-}
 
 /** Register a new user with email/password and set display name. */
 export async function register(email: string, password: string, fullName: string): Promise<User> {
