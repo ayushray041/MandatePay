@@ -207,34 +207,32 @@ export default function Home() {
       <section>
         <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-end">
           <div className="max-w-2xl">
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-400">
-              One connected workflow
-            </p>
-            <h2 className="mt-3 text-3xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-4xl">
+            <p className="mp-kicker">One connected workflow</p>
+            <h2 className="mp-section-title mt-3 text-mp-ink">
               Built around the full commerce lifecycle
             </h2>
           </div>
-          <p className="max-w-md leading-7 text-gray-600 dark:text-gray-300">
-            Bring the rules, conversation, contract changes, and payment authorization into a
-            shared workflow.
+          <p className="mp-copy max-w-md">
+            MandatePay is designed to connect the rules, negotiation, contract changes, and payment
+            authorization in a single workflow.
           </p>
         </div>
-        <div className="mt-9 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-9 grid border-y border-mp-warm-grey sm:grid-cols-2 lg:grid-cols-3">
           {capabilities.map((feature) => {
             const Icon = feature.icon;
 
             return (
               <article
                 key={feature.title}
-                className="rounded-2xl border border-gray-200 bg-white p-6 transition-shadow hover:shadow-md dark:border-gray-700 dark:bg-gray-800"
+                className="border-b border-mp-warm-grey bg-mp-surface p-6 last:border-b-0 sm:odd:border-r lg:border-r lg:nth-[3n]:border-r-0"
               >
-                <div className="mb-5 inline-flex rounded-xl bg-emerald-50 p-3 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300">
+                <div className="mb-5 inline-flex bg-mp-app-bg p-3 text-mp-ink">
                   <Icon size={22} />
                 </div>
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                <h3 className="text-lg font-semibold tracking-tight text-mp-ink">
                   {feature.title}
                 </h3>
-                <p className="mt-2 leading-6 text-gray-600 dark:text-gray-300">
+                <p className="mp-copy mt-2">
                   {feature.description}
                 </p>
               </article>
@@ -243,21 +241,19 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="rounded-3xl border border-gray-200 bg-gray-100/80 p-6 dark:border-gray-700 dark:bg-gray-800/70 sm:p-10">
+      <section className="border-y border-mp-warm-grey bg-mp-app-bg py-10 sm:py-14">
         <div className="grid gap-10 lg:grid-cols-[0.8fr_1.2fr] lg:items-start">
           <div>
-            <div className="inline-flex rounded-xl bg-white p-3 text-emerald-700 shadow-sm dark:bg-gray-900 dark:text-emerald-300">
+            <div className="inline-flex bg-mp-surface p-3 text-mp-orange">
               <ShieldCheck size={24} />
             </div>
-            <p className="mt-5 text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-400">
-              Security foundations
-            </p>
-            <h2 className="mt-3 text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
+            <p className="mp-kicker mt-5">Security foundations</p>
+            <h2 className="mp-section-title mt-3 text-mp-ink">
               Trust should be part of the flow.
             </h2>
-            <p className="mt-4 leading-7 text-gray-600 dark:text-gray-300">
-              MandatePay is being built around verified identity and explicit approval. The
-              security details below reflect what is implemented today.
+            <p className="mp-copy mt-4">
+              Identity checks are implemented for profile APIs. Broader project permissions and
+              transaction audit logging are not implemented yet.
             </p>
           </div>
           <div className="grid gap-4">
@@ -267,21 +263,21 @@ export default function Home() {
               return (
                 <article
                   key={item.title}
-                  className="flex gap-4 rounded-xl border border-gray-200 bg-white p-5 dark:border-gray-700 dark:bg-gray-900/60"
+                  className="mp-panel flex gap-4 p-5"
                 >
-                  <div className="mt-0.5 shrink-0 text-emerald-700 dark:text-emerald-400">
+                  <div className="mt-0.5 shrink-0 text-mp-orange">
                     <Icon size={21} />
                   </div>
                   <div>
-                    <h3 className="font-semibold text-gray-900 dark:text-white">{item.title}</h3>
-                    <p className="mt-1 leading-6 text-gray-600 dark:text-gray-300">
+                    <h3 className="font-semibold text-mp-ink">{item.title}</h3>
+                    <p className="mp-copy mt-1">
                       {item.description}
                     </p>
                   </div>
                   {item.title === 'Verified identity' ? (
                     <BadgeCheck
-                      aria-label="Implemented"
-                      className="ml-auto mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400"
+                      aria-label="Implemented for profile API"
+                      className="ml-auto mt-0.5 shrink-0 text-mp-orange"
                       size={19}
                     />
                   ) : null}
@@ -292,19 +288,19 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="overflow-hidden rounded-3xl bg-emerald-600 px-6 py-12 text-center text-white sm:px-10 sm:py-16">
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-100">
+      <section className="overflow-hidden bg-mp-orange px-6 py-12 text-center text-white sm:px-10 sm:py-16">
+        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white">
           Move from discussion to agreement
         </p>
         <h2 className="mx-auto mt-3 max-w-3xl text-3xl font-bold tracking-tight sm:text-4xl">
           Give every negotiation a clear path to payment.
         </h2>
-        <p className="mx-auto mt-4 max-w-2xl leading-7 text-emerald-50">
+        <p className="mx-auto mt-4 max-w-2xl leading-7 text-white">
           Start with the people, terms, and approvals that make an agreement yours.
         </p>
         <Link
           href="/signup"
-          className="mt-8 inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-white px-5 font-semibold text-emerald-800 transition-colors hover:bg-emerald-50"
+          className="mt-8 inline-flex min-h-12 items-center justify-center gap-2 bg-mp-ink px-5 font-semibold text-white transition-colors hover:bg-mp-medium-grey"
         >
           Get Started <ArrowRight size={18} />
         </Link>
