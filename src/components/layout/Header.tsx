@@ -38,7 +38,7 @@ export const Header: React.FC = () => {
           </Link>
           <Link
             href="/signup"
-            className="inline-flex min-h-10 items-center justify-center bg-mp-orange px-4 text-sm font-semibold text-white transition-colors hover:bg-mp-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mp-orange"
+            className="inline-flex min-h-10 items-center justify-center bg-mp-orange px-4 text-sm font-semibold text-mp-ink transition-colors hover:bg-mp-app-bg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mp-orange"
           >
             Create account
           </Link>
@@ -56,12 +56,12 @@ export const Header: React.FC = () => {
         </button>
       </div>
 
-      {open && (
-        <nav
-          id="mobile-primary-navigation"
-          aria-label="Primary navigation"
-          className="border-t border-mp-warm-grey bg-mp-surface px-4 pb-4 pt-2 md:hidden"
-        >
+      <nav
+        id="mobile-primary-navigation"
+        aria-label="Primary navigation"
+        hidden={!open}
+        className="border-t border-mp-warm-grey bg-mp-surface px-4 pb-4 pt-2 md:hidden"
+      >
           {links.map(({ href, label }) => {
             const isActive = pathname === href;
 
@@ -88,13 +88,12 @@ export const Header: React.FC = () => {
             <Link
               href="/signup"
               onClick={() => setOpen(false)}
-              className="bg-mp-orange px-3 py-2 text-sm font-semibold text-white"
+              className="bg-mp-orange px-3 py-2 text-sm font-semibold text-mp-ink"
             >
               Create account
             </Link>
           </div>
-        </nav>
-      )}
+      </nav>
     </header>
   );
 };

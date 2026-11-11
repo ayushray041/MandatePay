@@ -109,7 +109,7 @@ export default function Home() {
             <div className="mt-9 flex flex-col gap-3 sm:flex-row">
               <Link
                 href="/signup"
-                className="inline-flex min-h-12 items-center justify-center gap-2 bg-mp-orange px-5 font-semibold text-white transition-colors hover:bg-mp-surface hover:text-mp-ink"
+                className="inline-flex min-h-12 items-center justify-center gap-2 bg-mp-orange px-5 font-semibold text-mp-ink transition-colors hover:bg-mp-surface"
               >
                 Get Started <ArrowRight size={18} />
               </Link>
@@ -288,14 +288,14 @@ export default function Home() {
         </div>
       </section>
 
-      <section className="overflow-hidden bg-mp-orange px-6 py-12 text-center text-white sm:px-10 sm:py-16">
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-white">
+      <section className="overflow-hidden bg-mp-orange px-6 py-12 text-center text-mp-ink sm:px-10 sm:py-16">
+        <p className="text-sm font-semibold uppercase tracking-[0.18em]">
           Move from discussion to agreement
         </p>
         <h2 className="mx-auto mt-3 max-w-3xl text-3xl font-bold tracking-tight sm:text-4xl">
           Give every negotiation a clear path to payment.
         </h2>
-        <p className="mx-auto mt-4 max-w-2xl leading-7 text-white">
+        <p className="mx-auto mt-4 max-w-2xl leading-7">
           Start with the people, terms, and approvals that make an agreement yours.
         </p>
         <Link

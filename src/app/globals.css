@@ -79,14 +79,6 @@ body {
   background: var(--mp-surface);
 }
 
-.mp-divider {
-  border-color: var(--mp-warm-grey);
-}
-
-.mp-muted {
-  color: var(--mp-medium-grey);
-}
-
 .mp-empty-state {
   border: 1px dashed var(--mp-warm-grey);
   background: var(--mp-surface);
