@@ -12,6 +12,7 @@ import {
   getIdToken,
   logout as firebaseLogout,
 } from '@/lib/firebase/auth-client';
+import { firebaseApp } from '@/lib/firebase/client';
 import type { User } from 'firebase/auth';
 
 interface AuthContextProps {
@@ -25,10 +26,10 @@ const AuthContext = createContext<AuthContextProps | undefined>(undefined);
 
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(Boolean(firebaseApp));
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
+    if (typeof window === 'undefined' || !firebaseApp) {
       return;
     }
 
