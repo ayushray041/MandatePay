@@ -1,90 +1,144 @@
 import { z } from 'zod';
 import { NextResponse } from 'next/server';
-import { adminAuth, adminFirestore } from '@/lib/firebase/admin';
-import { doc, getDoc, setDoc, updateDoc, serverTimestamp } from 'firebase-admin/firestore';
+import { adminFirestore } from '@/lib/firebase/admin';
+import { verifyIdToken } from '@/lib/firebase/verify-token';
+import { FieldValue } from 'firebase-admin/firestore';
 
-// Zod schemas
 const profileSchema = z.object({
-  displayName: z.string().min(1).max(100),
+  displayName: z.string().trim().min(1).max(100),
 });
+
+const updateProfileSchema = profileSchema.partial();
 
 export async function GET(request: Request) {
   const authHeader = request.headers.get('Authorization');
-  const verification = await verifyToken(authHeader);
+  const verification = await verifyIdToken(authHeader);
+
   if (!verification.success) {
     return NextResponse.json({ error: verification.error }, { status: 401 });
   }
-  const { uid } = verification;
-  const profileRef = doc(adminFirestore, 'users', uid);
-  const snap = await getDoc(profileRef);
-  if (!snap.exists()) {
+
+  const uid = verification.uid;
+  if (!uid) {
+    return NextResponse.json({ error: 'Authentication context missing' }, { status: 401 });
+  }
+
+  if (!adminFirestore) {
+    return NextResponse.json({ error: 'Firebase Admin SDK is not configured' }, { status: 500 });
+  }
+
+  const db = adminFirestore;
+  const userRef = db.collection('users').doc(uid);
+  const snapshot = await userRef.get();
+
+  if (!snapshot.exists) {
     return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
   }
-  return NextResponse.json(snap.data());
+
+  return NextResponse.json(snapshot.data());
 }
 
 export async function POST(request: Request) {
   const authHeader = request.headers.get('Authorization');
-  const verification = await verifyToken(authHeader);
+  const verification = await verifyIdToken(authHeader);
+
   if (!verification.success) {
     return NextResponse.json({ error: verification.error }, { status: 401 });
   }
-  const { uid, email } = verification;
 
-  const body = await request.json();
+  const uid = verification.uid;
+  const email = verification.email;
+  if (!uid || !email) {
+    return NextResponse.json({ error: 'Authentication context missing' }, { status: 401 });
+  }
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
   const parsed = profileSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json({ error: 'Invalid body', details: parsed.error.format() }, { status: 400 });
+    return NextResponse.json(
+      { error: 'Invalid body', details: parsed.error.issues.map((issue) => issue.message) },
+      { status: 400 },
+    );
   }
-  const profileRef = doc(adminFirestore, 'users', uid);
-  const snap = await getDoc(profileRef);
-  if (snap.exists()) {
+
+  if (!adminFirestore) {
+    return NextResponse.json({ error: 'Firebase Admin SDK is not configured' }, { status: 500 });
+  }
+
+  const db = adminFirestore;
+  const userRef = db.collection('users').doc(uid);
+  const snapshot = await userRef.get();
+
+  if (snapshot.exists) {
     return NextResponse.json({ error: 'Profile already exists' }, { status: 400 });
   }
+
   const data = {
     uid,
     email,
     displayName: parsed.data.displayName,
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp(),
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
   };
-  await setDoc(profileRef, data);
-  return NextResponse.json(data, { status: 201 });
+
+  await userRef.set(data, { merge: true });
+  const createdProfile = await userRef.get();
+  return NextResponse.json(createdProfile.data(), { status: 201 });
 }
 
 export async function PATCH(request: Request) {
   const authHeader = request.headers.get('Authorization');
-  const verification = await verifyToken(authHeader);
+  const verification = await verifyIdToken(authHeader);
+
   if (!verification.success) {
     return NextResponse.json({ error: verification.error }, { status: 401 });
   }
-  const { uid } = verification;
-  const body = await request.json();
-  const parsed = profileSchema.partial().safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: 'Invalid body', details: parsed.error.format() }, { status: 400 });
+
+  const uid = verification.uid;
+  if (!uid) {
+    return NextResponse.json({ error: 'Authentication context missing' }, { status: 401 });
   }
-  const profileRef = doc(adminFirestore, 'users', uid);
-  const snap = await getDoc(profileRef);
-  if (!snap.exists()) {
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+  }
+
+  const parsed = updateProfileSchema.safeParse(body);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: 'Invalid body', details: parsed.error.issues.map((issue) => issue.message) },
+      { status: 400 },
+    );
+  }
+
+  if (!adminFirestore) {
+    return NextResponse.json({ error: 'Firebase Admin SDK is not configured' }, { status: 500 });
+  }
+
+  const db = adminFirestore;
+  const userRef = db.collection('users').doc(uid);
+  const snapshot = await userRef.get();
+
+  if (!snapshot.exists) {
     return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
   }
-  const updateData = { ...parsed.data, updatedAt: serverTimestamp() };
-  await updateDoc(profileRef, updateData);
-  const updatedSnap = await getDoc(profileRef);
-  return NextResponse.json(updatedSnap.data());
+
+  const updateData = {
+    ...parsed.data,
+    updatedAt: FieldValue.serverTimestamp(),
+  };
+
+  await userRef.update(updateData);
+  const updatedSnapshot = await userRef.get();
+  return NextResponse.json(updatedSnapshot.data());
 }
 
-// Helper verification function
-async function verifyToken(authHeader: string | null): Promise<{ success: boolean; uid?: string; email?: string; error?: string }> {
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    return { success: false, error: 'Missing or malformed Authorization header' };
-  }
-  const token = authHeader.split(' ')[1];
-  try {
-    const decoded = await adminAuth.verifyIdToken(token);
-    return { success: true, uid: decoded.uid, email: decoded.email };
-  } catch (e: any) {
-    return { success: false, error: e.message ?? 'Invalid token' };
-  }
-}
