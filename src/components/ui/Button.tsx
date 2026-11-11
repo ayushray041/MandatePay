@@ -1,20 +1,31 @@
 import React from 'react';
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?: 'primary' | 'secondary' | 'ghost';
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost';
   children: React.ReactNode;
 }
 
-export const Button: React.FC<ButtonProps> = ({ variant = 'primary', className = '', children, ...props }) => {
-  const base = 'px-4 py-2 rounded transition-colors font-medium';
-  const variants = {
-    primary: 'bg-emerald-600 text-white hover:bg-emerald-700',
-    secondary: 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-100 hover:bg-gray-300 dark:hover:bg-gray-600',
-    ghost: 'bg-transparent text-emerald-600 hover:bg-emerald-100 dark:hover:bg-emerald-900',
-  };
-  return (
-    <button className={`${base} ${variants[variant]} ${className}`} {...props}>
-      {children}
-    </button>
-  );
+const buttonStyles: Record<NonNullable<ButtonProps['variant']>, string> = {
+  primary:
+    'bg-mp-orange text-white hover:bg-mp-ink focus-visible:outline-mp-orange',
+  secondary:
+    'bg-mp-ink text-white hover:bg-mp-medium-grey focus-visible:outline-mp-ink',
+  outline:
+    'border border-mp-warm-grey bg-mp-surface text-mp-ink hover:border-mp-ink focus-visible:outline-mp-orange',
+  ghost:
+    'bg-transparent text-mp-ink hover:bg-mp-app-bg focus-visible:outline-mp-orange',
 };
+
+export const Button: React.FC<ButtonProps> = ({
+  variant = 'primary',
+  className = '',
+  children,
+  ...props
+}) => (
+  <button
+    className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-4 py-2 text-sm font-semibold transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:opacity-50 ${buttonStyles[variant]} ${className}`}
+    {...props}
+  >
+    {children}
+  </button>
+);
