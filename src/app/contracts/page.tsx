@@ -1,60 +1,71 @@
-import React from 'react';
-import { Card } from '@/components/ui/Card';
-import { Button } from '@/components/ui/Button';
+import Link from 'next/link';
+import { ArrowRight, FileSearch, FileText } from 'lucide-react';
 
-// Demo contract data
-const originalContract = `
-Agreement between Acme Corp (Client) and John Doe (Freelancer).
-Scope: Design a responsive website.
-Deliverables: Home page, About page, Contact page.
-Payment: $2000 upon completion.
-`; 
-
-const clientRequest = `Please add a blog section with SEO optimization and increase the total pages to 6.`;
-
-// Dummy analysis result
-const analysis = {
-  added: ['Blog section', 'SEO optimization'],
-  modified: ['Total pages increased from 3 to 6'],
-  removed: [],
-  alreadyIncluded: ['Home page', 'About page', 'Contact page'],
-  ambiguous: ['SEO optimization details'],
-  evidence: ['Line 12 of original contract mentions "responsive website"', 'Line 8 mentions "Deliverables"'],
-};
+const reviewStages = ['Original agreement', 'Requested changes', 'Evidence and ambiguity'];
 
 export default function ContractsPage() {
   return (
-    <section className="space-y-8">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white">Contract Intelligence</h1>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Card
-          title="Original Contract"
-          value={<textarea readOnly rows={10} className="w-full p-2 border rounded" defaultValue={originalContract} />}
-        />
-        <Card
-          title="Client Change Request"
-          value={<textarea readOnly rows={10} className="w-full p-2 border rounded" defaultValue={clientRequest} />}
-        />
-      </div>
-      <div className="mt-6">
-        <h2 className="text-xl font-semibold mb-2 text-gray-800 dark:text-gray-100">Scope‑Change Analysis</h2>
-        <ul className="list-disc list-inside space-y-1 text-gray-700 dark:text-gray-300">
-          <li><strong>Added:</strong> {analysis.added.join(', ')}</li>
-          <li><strong>Modified:</strong> {analysis.modified.join(', ')}</li>
-          <li><strong>Removed:</strong> {analysis.removed.length ? analysis.removed.join(', ') : 'None'}</li>
-          <li><strong>Already Included:</strong> {analysis.alreadyIncluded.join(', ')}</li>
-          <li><strong>Ambiguous:</strong> {analysis.ambiguous.join(', ')}</li>
-        </ul>
-        <h3 className="mt-4 text-lg font-medium text-gray-800 dark:text-gray-100">Evidence</h3>
-        <ul className="list-disc list-inside ml-4 text-gray-600 dark:text-gray-400">
-          {analysis.evidence.map((e, i) => (
-            <li key={i}>{e}</li>
-          ))}
-        </ul>
-        <div className="mt-4 flex gap-2">
-          <Button variant="primary">Approve Changes</Button>
-          <Button variant="secondary">Reject / Edit</Button>
-        </div>
+    <section className="mp-page mx-auto w-full max-w-7xl space-y-8">
+      <header className="border-b border-mp-warm-grey pb-6">
+        <p className="mp-kicker">Contract intelligence</p>
+        <h1 className="mp-page-title mt-2">Contracts</h1>
+        <p className="mp-copy mt-3 max-w-2xl">
+          Keep the signed scope visible as proposed changes are examined against the original
+          agreement.
+        </p>
+      </header>
+
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1.3fr)_minmax(16rem,0.7fr)]">
+        <section aria-labelledby="contract-register-heading">
+          <div className="mb-4 flex items-center justify-between gap-4">
+            <h2 id="contract-register-heading" className="text-lg font-semibold">
+              Contract register
+            </h2>
+            <span className="text-sm text-mp-medium-grey">No records</span>
+          </div>
+          <div className="mp-empty-state flex min-h-64 flex-col items-center justify-center px-6 py-10 text-center">
+            <FileText size={25} className="text-mp-medium-grey" aria-hidden="true" />
+            <h3 className="mt-4 text-lg font-semibold">No contract records available</h3>
+            <p className="mp-copy mt-2 max-w-lg">
+              Contract documents and analyses will appear here when the contract workflow is
+              connected. No contract content is loaded in this workspace.
+            </p>
+            <Link
+              href="/projects"
+              className="mt-5 inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-mp-ink underline decoration-mp-orange decoration-2 underline-offset-4 hover:text-mp-medium-grey focus-visible:outline focus-visible:outline-2 focus-visible:outline-mp-orange"
+            >
+              Open projects <ArrowRight size={16} aria-hidden="true" />
+            </Link>
+          </div>
+        </section>
+
+        <aside aria-labelledby="review-stages-heading" className="border-l-2 border-mp-orange pl-5">
+          <div className="flex items-center gap-3">
+            <FileSearch className="text-mp-orange" size={22} aria-hidden="true" />
+            <h2 id="review-stages-heading" className="text-lg font-semibold">
+              Review framework
+            </h2>
+          </div>
+          <p className="mp-copy mt-3">
+            A contract review should make each proposed change traceable to its source.
+          </p>
+          <ol className="mt-6">
+            {reviewStages.map((stage, index) => (
+              <li
+                key={stage}
+                className="flex gap-4 border-t border-mp-warm-grey py-4 last:border-b"
+              >
+                <span className="font-mono text-sm text-mp-medium-grey">
+                  0{index + 1}
+                </span>
+                <span className="font-medium">{stage}</span>
+              </li>
+            ))}
+          </ol>
+          <p className="mt-4 text-sm text-mp-medium-grey">
+            This describes the review approach; no analysis is currently attached to a contract.
+          </p>
+        </aside>
       </div>
     </section>
   );
