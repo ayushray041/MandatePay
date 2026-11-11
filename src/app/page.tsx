@@ -170,42 +170,38 @@ export default function Home() {
 
       <section id="how-it-works" className="scroll-mt-8">
         <div className="mx-auto max-w-2xl text-center">
-          <p className="text-sm font-semibold uppercase tracking-[0.18em] text-emerald-700 dark:text-emerald-400">
-            A deliberate process
-          </p>
-          <h2 className="mt-3 text-3xl font-bold tracking-tight text-gray-900 dark:text-white sm:text-4xl">
-            How it works
-          </h2>
-          <p className="mt-4 leading-7 text-gray-600 dark:text-gray-300">
+          <p className="mp-kicker">A deliberate process</p>
+          <h2 className="mp-section-title mt-3 text-mp-ink">How it works</h2>
+          <p className="mp-copy mt-4">
             Keep the rules clear, the negotiation bounded, and the payment connected to an
             approved agreement.
           </p>
         </div>
-        <div className="mt-10 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <ol className="mt-10 grid gap-0 border-y border-mp-warm-grey sm:grid-cols-2 xl:grid-cols-4">
           {steps.map((step) => {
             const Icon = step.icon;
 
             return (
-              <article
+              <li
                 key={step.number}
-                className="rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-gray-700 dark:bg-gray-800"
+                className="border-b border-mp-warm-grey bg-mp-surface p-6 last:border-b-0 sm:border-r sm:last:border-r-0 xl:border-b-0"
               >
                 <div className="flex items-center justify-between">
-                  <span className="text-sm font-semibold text-emerald-700 dark:text-emerald-400">
+                  <span className="text-sm font-semibold text-mp-orange">
                     STEP {step.number}
                   </span>
-                  <Icon className="text-gray-400 dark:text-gray-500" size={21} />
+                  <Icon className="text-mp-medium-grey" size={21} />
                 </div>
-                <h3 className="mt-5 text-xl font-semibold text-gray-900 dark:text-white">
+                <h3 className="mt-5 text-xl font-semibold tracking-tight text-mp-ink">
                   {step.title}
                 </h3>
-                <p className="mt-2 leading-6 text-gray-600 dark:text-gray-300">
+                <p className="mp-copy mt-2">
                   {step.description}
                 </p>
-              </article>
+              </li>
             );
           })}
-        </div>
+        </ol>
       </section>
 
       <section>
