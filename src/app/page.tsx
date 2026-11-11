@@ -91,20 +91,17 @@ const safeguards = [
 export default function Home() {
   return (
     <div className="mx-auto w-full max-w-7xl space-y-20 pb-12 sm:space-y-28">
-      <section className="relative isolate overflow-hidden rounded-3xl bg-[#001F3F] px-6 py-14 text-white shadow-xl sm:px-10 sm:py-20 lg:px-16">
-        <div className="pointer-events-none absolute -right-20 -top-32 -z-10 h-96 w-96 rounded-full bg-emerald-400/20 blur-3xl" />
-        <div className="pointer-events-none absolute -bottom-48 left-1/3 -z-10 h-96 w-96 rounded-full bg-sky-400/10 blur-3xl" />
-
+      <section className="overflow-hidden bg-mp-ink px-6 py-14 text-white sm:px-10 sm:py-20 lg:px-16">
         <div className="grid items-center gap-12 lg:grid-cols-[1.15fr_0.85fr]">
           <div className="max-w-2xl">
-            <p className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-sm text-emerald-200">
-              <span className="h-2 w-2 rounded-full bg-emerald-400" />
+            <p className="mb-5 inline-flex items-center gap-2 border border-mp-medium-grey px-3 py-1.5 text-sm text-mp-app-bg">
+              <span className="h-2 w-2 bg-mp-orange" />
               A clearer way to agree and pay
             </p>
-            <h1 className="text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
+            <h1 className="mp-display text-white">
               The infrastructure for agent-to-agent commerce.
             </h1>
-            <p className="mt-6 max-w-xl text-lg leading-8 text-slate-200">
+            <p className="mt-6 max-w-xl text-lg leading-8 text-mp-app-bg">
               AI agents can discover services, negotiate terms, and execute authorized payments.
               MandatePay brings the agreement and payment flow together, with people in control of
               the final approval.
@@ -112,30 +109,30 @@ export default function Home() {
             <div className="mt-9 flex flex-col gap-3 sm:flex-row">
               <Link
                 href="/signup"
-                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg bg-emerald-500 px-5 font-semibold text-[#001F3F] transition-colors hover:bg-emerald-400"
+                className="inline-flex min-h-12 items-center justify-center gap-2 bg-mp-orange px-5 font-semibold text-white transition-colors hover:bg-mp-surface hover:text-mp-ink"
               >
                 Get Started <ArrowRight size={18} />
               </Link>
               <Link
                 href="/dashboard"
-                className="inline-flex min-h-12 items-center justify-center gap-2 rounded-lg border border-white/25 px-5 font-semibold text-white transition-colors hover:bg-white/10"
+                className="inline-flex min-h-12 items-center justify-center gap-2 border border-mp-medium-grey px-5 font-semibold text-white transition-colors hover:bg-mp-medium-grey"
               >
                 Explore Dashboard <ArrowUpRight size={18} />
               </Link>
             </div>
-            <p className="mt-5 text-sm text-slate-300">
+            <p className="mt-5 text-sm text-mp-warm-grey">
               Human approval stays part of the process.
             </p>
           </div>
 
           <div className="mx-auto w-full max-w-md">
-            <div className="rounded-2xl border border-white/15 bg-white/[0.07] p-5 shadow-2xl backdrop-blur sm:p-6">
-              <div className="flex items-center justify-between border-b border-white/10 pb-4">
+            <div className="border border-mp-warm-grey bg-mp-surface p-5 text-mp-ink sm:p-6">
+              <div className="flex items-center justify-between border-b border-mp-warm-grey pb-4">
                 <div>
-                  <p className="text-sm font-medium text-slate-300">Agreement flow</p>
+                  <p className="text-sm font-medium text-mp-medium-grey">Agreement flow</p>
                   <p className="mt-1 text-lg font-semibold">From terms to payment</p>
                 </div>
-                <div className="rounded-xl bg-emerald-400/15 p-3 text-emerald-300">
+                <div className="bg-mp-orange p-3 text-white">
                   <Workflow size={24} />
                 </div>
               </div>
@@ -146,16 +143,16 @@ export default function Home() {
                   return (
                     <div
                       key={step.number}
-                      className="flex items-center gap-4 rounded-xl border border-white/10 bg-[#00172f]/60 p-3.5"
+                      className="flex items-start gap-4 border-b border-mp-warm-grey py-3.5 last:border-0"
                     >
-                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-400/10 text-emerald-300">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center bg-mp-app-bg text-mp-ink">
                         <Icon size={20} />
                       </div>
                       <div className="min-w-0 flex-1">
                         <p className="font-medium">{step.title}</p>
-                        <p className="mt-0.5 text-sm text-slate-400">{step.description}</p>
+                        <p className="mt-0.5 text-sm text-mp-medium-grey">{step.description}</p>
                       </div>
-                      <span className="text-xs font-medium text-slate-500">{step.number}</span>
+                      <span className="text-xs font-medium text-mp-medium-grey">{step.number}</span>
                     </div>
                   );
                 })}
@@ -165,7 +162,7 @@ export default function Home() {
         </div>
         <a
           href="#how-it-works"
-          className="mt-12 inline-flex items-center gap-2 text-sm text-slate-300 transition-colors hover:text-white"
+          className="mt-12 inline-flex items-center gap-2 text-sm text-mp-warm-grey transition-colors hover:text-white"
         >
           Discover how it works <ArrowDown size={16} />
         </a>
