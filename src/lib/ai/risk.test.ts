@@ -97,6 +97,22 @@ describe('deterministic financial risk intelligence', () => {
     expect(vendor.priceEstimate).toBeNull();
   });
 
+  it('uses net captured value for spending forecasts after a partial refund', () => {
+    const partial = {
+      ...payment('partial', 10_000, 'partially_refunded'),
+      refundedAmountMinor: 4_000,
+    };
+    const forecast = forecastSpending([
+      payment('completed', 10_000),
+      partial,
+    ], now, 'USD');
+
+    expect(forecast.spendingForecast).toMatchObject({
+      projectedSpendMinor: 16_000,
+      sampleSize: 2,
+    });
+  });
+
   it('flags high management-event bursts without inferring malicious intent', () => {
     const events = Array.from({ length: 30 }, (_, index) => ({
       action: `agent.action.${index}`,

@@ -63,7 +63,11 @@ export async function POST(request: Request, context: RouteContext) {
       if (payment.payerId !== uid) {
         throw new PaymentError(403, 'FORBIDDEN', 'Only the approved client account can capture this payment.');
       }
-      if (payment.status === 'completed') {
+      if (
+        payment.status === 'completed'
+        || payment.status === 'partially_refunded'
+        || payment.status === 'refunded'
+      ) {
         alreadyCompleted = payment;
         return payment;
       }
@@ -145,7 +149,10 @@ export async function POST(request: Request, context: RouteContext) {
       if (!snapshot.exists || !payment) {
         throw new PaymentError(404, 'PAYMENT_NOT_FOUND', 'Payment was not found.');
       }
-      if (payment.status === 'completed' && payment.providerCaptureId === providerResult.captureId) {
+      if (
+        ['completed', 'partially_refunded', 'refunded'].includes(String(payment.status))
+        && payment.providerCaptureId === providerResult.captureId
+      ) {
         return payment;
       }
       const contractContext = await loadContractPaymentContext(
@@ -222,6 +229,7 @@ export async function POST(request: Request, context: RouteContext) {
         pendingOperation: completed || failed ? null : 'capture',
         ...(completed ? {
           providerCaptureId: providerResult.captureId,
+          receiptUrl: providerResult.receiptUrl ?? null,
           completedAt: timestamp,
           failureCode: null,
         } : failed ? { failureCode: 'PAYMENT_CAPTURE_FAILED' } : {}),
@@ -245,6 +253,7 @@ export async function POST(request: Request, context: RouteContext) {
         pendingOperation: completed || failed ? null : 'capture',
         ...(completed ? {
           providerCaptureId: providerResult.captureId,
+          receiptUrl: providerResult.receiptUrl ?? null,
           completedAt: new Date(),
           failureCode: null,
         } : failed ? { failureCode: 'PAYMENT_CAPTURE_FAILED' } : {}),

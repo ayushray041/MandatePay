@@ -117,7 +117,11 @@ export async function POST(request: Request, context: RouteContext) {
         alreadyCancelled = payment;
         return payment;
       }
-      if (payment.status === 'completed' || payment.status === 'refunded') {
+      if (
+        payment.status === 'completed'
+        || payment.status === 'partially_refunded'
+        || payment.status === 'refunded'
+      ) {
         throw new PaymentError(409, 'PAYMENT_NOT_CANCELLABLE', 'Completed payments cannot be cancelled.');
       }
       if (

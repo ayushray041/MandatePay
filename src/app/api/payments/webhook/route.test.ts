@@ -22,6 +22,7 @@ vi.mock('@/lib/marketplace/metrics', () => ({
   recordMarketplaceCaptureOutcome: mocks.recordMarketplaceCaptureOutcome,
 }));
 vi.mock('@/lib/payments/paypal', () => ({
+  validatedPayPalReceiptUrl: (value: unknown) => typeof value === 'string' ? value : null,
   verifyPayPalWebhookSignature: mocks.verifyPayPalWebhookSignature,
   PaymentProviderError: class PaymentProviderError extends Error {
     constructor(readonly code: string, message: string) {
@@ -68,6 +69,7 @@ const captureEvent = {
   resource: {
     id: 'capture-1',
     amount: { currency_code: 'USD', value: '10.00' },
+    links: [{ rel: 'receipt', href: 'https://www.sandbox.paypal.com/receipt?id=capture-1' }],
     supplementary_data: { related_ids: { order_id: 'order-1' } },
   },
 };
@@ -163,6 +165,7 @@ describe('PayPal payment webhook', () => {
     expect(payment).toMatchObject({
       status: 'completed',
       providerCaptureId: 'capture-1',
+      receiptUrl: 'https://www.sandbox.paypal.com/receipt?id=capture-1',
       eventCount: 3,
     });
     expect(payerMandate).toMatchObject({ reservedAmountMinor: 0, spentAmountMinor: 1_000 });
@@ -250,6 +253,90 @@ describe('PayPal payment webhook', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.recordMarketplaceCaptureOutcome).not.toHaveBeenCalled();
+  });
+
+  it('reconciles partial refunds once per provider refund ID, even across different webhook event IDs', async () => {
+    const refundKeyHash = 'a'.repeat(64);
+    const refundEvent = {
+      id: 'paypal-event-refund-1',
+      event_type: 'PAYMENT.CAPTURE.REFUNDED',
+      resource: {
+        id: 'refund-1',
+        amount: { currency_code: 'USD', value: '4.00' },
+        supplementary_data: { related_ids: { capture_id: 'capture-1' } },
+      },
+    };
+    const paymentPath = 'payments/contract-1';
+    const refundPath = `${paymentPath}/refunds/${refundKeyHash}`;
+    mocks.documents.set(paymentPath, {
+      contractId: 'contract-1',
+      participantIds: ['payer', 'payee'],
+      payerId: 'payer',
+      payerMandateId: 'mandate-payer',
+      payeeId: 'payee',
+      payeeMandateId: 'mandate-payee',
+      amountMinor: 1_000,
+      refundedAmountMinor: 0,
+      currency: 'USD',
+      status: 'processing',
+      pendingOperation: 'refund',
+      pendingRefundId: refundKeyHash,
+      pendingRefundAmountMinor: 400,
+      providerCaptureId: 'capture-1',
+      eventCount: 3,
+    });
+    mocks.documents.set(refundPath, {
+      amountMinor: 400,
+      currency: 'USD',
+      reason: 'Partial service issue',
+      status: 'pending',
+      providerRefundId: 'refund-1',
+    });
+    mocks.documents.set('mandates/mandate-payer', {
+      ...ledgerContext.mandates[0],
+      spentAmountMinor: 1_000,
+    });
+    mocks.loadPaymentLedgerContext.mockResolvedValueOnce({
+      ...ledgerContext,
+      mandates: [
+        { ...ledgerContext.mandates[0], spentAmountMinor: 1_000 },
+        ledgerContext.mandates[1],
+      ],
+    });
+
+    const firstResponse = await receiveWebhook(request(refundEvent));
+    const firstBody = await firstResponse.json();
+    expect(firstResponse.status).toBe(200);
+    expect(firstBody.data).toMatchObject({ outcome: 'partially_refunded', paymentId: 'contract-1' });
+    expect(mocks.documents.get(paymentPath)).toMatchObject({
+      status: 'partially_refunded',
+      refundedAmountMinor: 400,
+      pendingOperation: null,
+    });
+    expect(mocks.documents.get('mandates/mandate-payer')).toMatchObject({ spentAmountMinor: 600 });
+    expect(mocks.documents.get(refundPath)).toMatchObject({ status: 'completed', providerRefundId: 'refund-1' });
+
+    const distinctEventReplay = await receiveWebhook(request({
+      ...refundEvent,
+      id: 'paypal-event-refund-duplicate-notification',
+    }));
+    const replayBody = await distinctEventReplay.json();
+    expect(distinctEventReplay.status).toBe(200);
+    expect(replayBody.data).toMatchObject({ outcome: 'already_applied' });
+    expect(mocks.documents.get('mandates/mandate-payer')).toMatchObject({ spentAmountMinor: 600 });
+
+    const conflictingReplay = await receiveWebhook(request({
+      ...refundEvent,
+      id: 'paypal-event-refund-conflicting-replay',
+      resource: {
+        ...refundEvent.resource,
+        amount: { currency_code: 'USD', value: '4.01' },
+      },
+    }));
+    const conflictingBody = await conflictingReplay.json();
+    expect(conflictingReplay.status).toBe(200);
+    expect(conflictingBody.data).toMatchObject({ outcome: 'reconciliation_required' });
+    expect(mocks.documents.get('mandates/mandate-payer')).toMatchObject({ spentAmountMinor: 600 });
   });
 
   it('records a denied capture as one failed marketplace outcome', async () => {

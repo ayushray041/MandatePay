@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   assertPaymentMatchesContract: vi.fn(),
   createPayPalOrder: vi.fn(),
   isPayPalConfigured: vi.fn(),
+  refundPayPalCapture: vi.fn(),
   loadContractPaymentContext: vi.fn(),
   firestore: {
     collection: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock('@/lib/payments/events', () => ({ writePaymentEvent: mocks.writePaymentE
 vi.mock('@/lib/payments/paypal', () => ({
   createPayPalOrder: mocks.createPayPalOrder,
   isPayPalConfigured: mocks.isPayPalConfigured,
+  refundPayPalCapture: mocks.refundPayPalCapture,
   PaymentProviderError: class PaymentProviderError extends Error {
     constructor(readonly code: string, message: string) {
       super(message);
@@ -36,6 +38,7 @@ vi.mock('@/lib/payments/paypal', () => ({
 import { POST as createPayment } from '@/app/api/payments/route';
 import { POST as authorizePayment } from '@/app/api/payments/[paymentId]/authorize/route';
 import { POST as cancelPayment } from '@/app/api/payments/[paymentId]/cancel/route';
+import { POST as refundPayment } from '@/app/api/payments/[paymentId]/refund/route';
 
 function reference(path: string) {
   const segments = path.split('/');
@@ -110,6 +113,15 @@ describe('payment APIs', () => {
       approvalUrl: 'https://www.sandbox.paypal.com/checkoutnow?token=sandbox-order-1',
     });
     mocks.isPayPalConfigured.mockReturnValue(true);
+    mocks.refundPayPalCapture.mockImplementation(async (input: {
+      amountMinor: number;
+      currency: string;
+    }) => ({
+      refundId: 'sandbox-refund-1',
+      status: 'COMPLETED',
+      amountMinor: input.amountMinor,
+      currency: input.currency,
+    }));
   });
 
   it('rejects unauthenticated payment creation', async () => {
@@ -201,5 +213,213 @@ describe('payment APIs', () => {
       status: 'pending',
       providerOrderId: 'sandbox-order-1',
     });
+  });
+
+  it('only lets the payer request refunds and requires a refund idempotency key', async () => {
+      mocks.documents.set('payments/contract-1', {
+        participantIds: ['payer', 'payee'],
+        payerId: 'payer',
+        status: 'completed',
+        amountMinor: 10_000,
+      });
+
+      const missingKeyResponse = await refundPayment(
+        jsonRequest({ reason: 'Duplicate charge' }),
+        { params: Promise.resolve({ paymentId: 'contract-1' }) },
+      );
+      expect(missingKeyResponse.status).toBe(400);
+
+      mocks.uid = 'payee';
+      mocks.authenticateRequest.mockResolvedValue({
+        authenticated: true,
+        user: { uid: 'payee' },
+      });
+      const forbiddenResponse = await refundPayment(
+        jsonRequest({ reason: 'Duplicate charge' }, { 'Idempotency-Key': 'refund-key-00000001' }),
+        { params: Promise.resolve({ paymentId: 'contract-1' }) },
+      );
+      expect(forbiddenResponse.status).toBe(403);
+      expect(mocks.refundPayPalCapture).not.toHaveBeenCalled();
+    });
+
+  it('rejects cumulative refunds above the captured balance without contacting PayPal', async () => {
+      mocks.documents.set('payments/contract-1', {
+        participantIds: ['payer', 'payee'],
+        payerId: 'payer',
+        payerMandateId: 'mandate-payer',
+        status: 'partially_refunded',
+        amountMinor: 10_000,
+        refundedAmountMinor: 7_500,
+        providerCaptureId: 'capture-1',
+        currency: 'USD',
+        attempts: { refund: 1 },
+        eventCount: 2,
+      });
+
+      const response = await refundPayment(
+        jsonRequest(
+          { reason: 'Remaining partial refund', amountMinor: 2_501 },
+          { 'Idempotency-Key': 'refund-key-00000002' },
+        ),
+        { params: Promise.resolve({ paymentId: 'contract-1' }) },
+      );
+
+      expect(response.status).toBe(409);
+      expect(mocks.refundPayPalCapture).not.toHaveBeenCalled();
+    });
+
+    it('bounds the number of partial refund operations per payment', async () => {
+      mocks.documents.set('payments/contract-1', {
+        participantIds: ['payer', 'payee'],
+        payerId: 'payer',
+        status: 'completed',
+        amountMinor: 10_000,
+        refundedAmountMinor: 0,
+        refundCount: 100,
+        providerCaptureId: 'capture-1',
+        currency: 'USD',
+      });
+
+      const response = await refundPayment(
+        jsonRequest(
+          { reason: 'Small refund', amountMinor: 1 },
+          { 'Idempotency-Key': 'refund-key-00000006' },
+        ),
+        { params: Promise.resolve({ paymentId: 'contract-1' }) },
+      );
+
+      expect(response.status).toBe(409);
+      expect(mocks.refundPayPalCapture).not.toHaveBeenCalled();
+    });
+
+  it('atomically applies partial refunds and replays the same key without a second provider request', async () => {
+      mocks.documents.set('payments/contract-1', {
+        participantIds: ['payer', 'payee'],
+        payerId: 'payer',
+        payerMandateId: 'mandate-payer',
+        amountMinor: 10_000,
+        refundedAmountMinor: 0,
+        currency: 'USD',
+        status: 'completed',
+        providerCaptureId: 'capture-1',
+        idempotencyKeyHash: 'payment-cycle-hash',
+        attempts: { refund: 0 },
+        eventCount: 2,
+      });
+      mocks.documents.set('mandates/mandate-payer', {
+        ownerId: 'payer',
+        spentAmountMinor: 10_000,
+      });
+      const request = () => jsonRequest(
+        { reason: 'Service partially delivered', amountMinor: 2_500 },
+        { 'Idempotency-Key': 'refund-key-00000003' },
+      );
+
+      const firstResponse = await refundPayment(request(), {
+        params: Promise.resolve({ paymentId: 'contract-1' }),
+      });
+      const firstBody = await firstResponse.json();
+      expect(firstResponse.status).toBe(200);
+      expect(firstBody.data).toMatchObject({
+        status: 'partially_refunded',
+        amountMinor: 10_000,
+        refundedAmountMinor: 2_500,
+      });
+      expect(mocks.documents.get('mandates/mandate-payer')).toMatchObject({ spentAmountMinor: 7_500 });
+      expect(mocks.refundPayPalCapture).toHaveBeenCalledTimes(1);
+      expect(mocks.refundPayPalCapture).toHaveBeenCalledWith(expect.objectContaining({
+        amountMinor: 2_500,
+        capturedAmountMinor: 10_000,
+        currency: 'USD',
+      }));
+
+      const replayResponse = await refundPayment(request(), {
+        params: Promise.resolve({ paymentId: 'contract-1' }),
+      });
+      expect(replayResponse.status).toBe(200);
+      expect(mocks.refundPayPalCapture).toHaveBeenCalledTimes(1);
+      expect(mocks.documents.get('mandates/mandate-payer')).toMatchObject({ spentAmountMinor: 7_500 });
+    });
+
+    it('defaults an omitted amount to the remaining balance and confirms a full refund', async () => {
+      mocks.documents.set('payments/contract-1', {
+        participantIds: ['payer', 'payee'],
+        payerId: 'payer',
+        payerMandateId: 'mandate-payer',
+        amountMinor: 10_000,
+        refundedAmountMinor: 0,
+        currency: 'USD',
+        status: 'completed',
+        providerCaptureId: 'capture-1',
+        idempotencyKeyHash: 'payment-cycle-hash',
+        attempts: { refund: 0 },
+        eventCount: 2,
+      });
+      mocks.documents.set('mandates/mandate-payer', {
+        ownerId: 'payer',
+        spentAmountMinor: 10_000,
+      });
+
+      const response = await refundPayment(
+        jsonRequest(
+          { reason: 'Refund entire capture' },
+          { 'Idempotency-Key': 'refund-key-00000005' },
+        ),
+        { params: Promise.resolve({ paymentId: 'contract-1' }) },
+      );
+      const body = await response.json();
+
+      expect(response.status).toBe(200);
+      expect(body.data).toMatchObject({
+        status: 'refunded',
+        refundedAmountMinor: 10_000,
+      });
+      expect(mocks.refundPayPalCapture).toHaveBeenCalledWith(expect.objectContaining({
+        amountMinor: 10_000,
+        capturedAmountMinor: 10_000,
+      }));
+      expect(mocks.documents.get('mandates/mandate-payer')).toMatchObject({ spentAmountMinor: 0 });
+    });
+
+  it('keeps a pending provider refund out of the mandate ledger', async () => {
+      mocks.documents.set('payments/contract-1', {
+        participantIds: ['payer', 'payee'],
+        payerId: 'payer',
+        payerMandateId: 'mandate-payer',
+        amountMinor: 10_000,
+        refundedAmountMinor: 0,
+        currency: 'USD',
+        status: 'completed',
+        providerCaptureId: 'capture-1',
+        idempotencyKeyHash: 'payment-cycle-hash',
+        attempts: { refund: 0 },
+        eventCount: 2,
+      });
+      mocks.documents.set('mandates/mandate-payer', {
+        ownerId: 'payer',
+        spentAmountMinor: 10_000,
+      });
+      mocks.refundPayPalCapture.mockResolvedValueOnce({
+        refundId: 'sandbox-refund-pending',
+        status: 'PENDING',
+        amountMinor: 2_500,
+        currency: 'USD',
+      });
+
+      const response = await refundPayment(
+        jsonRequest(
+          { reason: 'Refund pending', amountMinor: 2_500 },
+          { 'Idempotency-Key': 'refund-key-00000004' },
+        ),
+        { params: Promise.resolve({ paymentId: 'contract-1' }) },
+      );
+
+      expect(response.status).toBe(202);
+      expect(mocks.documents.get('payments/contract-1')).toMatchObject({
+        status: 'processing',
+        pendingOperation: 'refund',
+        refundedAmountMinor: 0,
+      });
+      expect(mocks.documents.get('mandates/mandate-payer')).toMatchObject({ spentAmountMinor: 10_000 });
   });
 });

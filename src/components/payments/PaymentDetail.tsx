@@ -12,11 +12,12 @@ import {
   capturePayment,
   getPayment,
   getPaymentIdempotencyKey,
+  getRefundIdempotencyKey,
   createPayment,
   refundPayment,
   type PaymentDetail as PaymentDetailData,
 } from '@/lib/payments/client';
-import { formatMinorAmount } from '@/lib/mandates/money';
+import { currencyFractionDigits, formatMinorAmount, parseMajorAmount } from '@/lib/mandates/money';
 import type { PaymentStatus } from '@/models/payment';
 
 const statusClassNames: Record<PaymentStatus, string> = {
@@ -25,6 +26,7 @@ const statusClassNames: Record<PaymentStatus, string> = {
   authorized: 'border-violet-700 bg-violet-50 text-violet-800',
   processing: 'border-sky-700 bg-sky-50 text-sky-800',
   completed: 'border-emerald-700 bg-emerald-50 text-emerald-800',
+  partially_refunded: 'border-amber-700 bg-amber-50 text-amber-900',
   failed: 'border-red-700 bg-red-50 text-red-800',
   cancelled: 'border-mp-warm-grey bg-mp-app-bg text-mp-medium-grey',
   refunded: 'border-mp-warm-grey bg-mp-app-bg text-mp-medium-grey',
@@ -40,7 +42,9 @@ const eventLabels: Record<string, string> = {
   'payment.retry_started': 'Provider operation retry started',
   'payment.completed': 'Payment capture confirmed',
   'payment.cancelled': 'Payment authorization cancelled',
-  'payment.refund_started': 'Full refund requested',
+  'payment.refund_started': 'Refund requested',
+  'payment.refund_pending': 'Provider is processing the refund',
+  'payment.partially_refunded': 'Partial refund confirmed',
   'payment.refunded': 'Provider refund confirmed',
   'payment.failed': 'Provider operation failed',
   'payment.webhook_processed': 'Provider notification processed',
@@ -64,7 +68,11 @@ function isSafeReceiptUrl(value: string | null): value is string {
   }
   try {
     const url = new URL(value);
-    return url.protocol === 'https:' && url.hostname.endsWith('.paypal.com');
+    return url.protocol === 'https:'
+      && !url.username
+      && !url.password
+      && !url.port
+      && (url.hostname === 'paypal.com' || url.hostname.endsWith('.paypal.com'));
   } catch {
     return false;
   }
@@ -90,6 +98,7 @@ export function PaymentDetail({ paymentId }: Props) {
   const [fulfillmentConfirmed, setFulfillmentConfirmed] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [refundReason, setRefundReason] = useState('');
+  const [refundAmount, setRefundAmount] = useState('');
 
   const load = useCallback(async (showSpinner = false) => {
     if (showSpinner) {
@@ -161,7 +170,7 @@ export function PaymentDetail({ paymentId }: Props) {
     );
   }
 
-  const { payment, events } = detail;
+  const { payment, events, refunds } = detail;
   const isPayer = user?.uid === payment.payerId;
   const hasUnapprovedProviderOrder = Boolean(
     payment.providerOrderId
@@ -169,7 +178,7 @@ export function PaymentDetail({ paymentId }: Props) {
     && payment.failureCode !== 'PAYMENT_AUTHORIZATION_DENIED',
   );
   const canCancel = isPayer
-    && !['completed', 'refunded', 'cancelled'].includes(payment.status)
+    && !['completed', 'partially_refunded', 'refunded', 'cancelled'].includes(payment.status)
     && !hasUnapprovedProviderOrder
     && !(payment.status === 'processing' && payment.pendingOperation !== 'cancel');
   const canAuthorize = isPayer && Boolean(payment.providerOrderId) && (
@@ -192,8 +201,11 @@ export function PaymentDetail({ paymentId }: Props) {
     && Boolean(user);
   const canRefund = isPayer && (
     payment.status === 'completed'
-    || (payment.status === 'processing' && payment.pendingOperation === 'refund')
+    || payment.status === 'partially_refunded'
   );
+  const refundInProgress = payment.status === 'processing' && payment.pendingOperation === 'refund';
+  const pendingRefund = refunds.find((refund) => refund.status === 'processing' || refund.status === 'pending');
+  const remainingRefundableMinor = Math.max(0, payment.amountMinor - payment.refundedAmountMinor);
 
   const startPaymentCycle = async (newCycle: boolean) => {
     if (!user) {
@@ -215,11 +227,26 @@ export function PaymentDetail({ paymentId }: Props) {
 
   const submitRefund = (formData: FormData) => {
     const reason = String(formData.get('refundReason') ?? '').trim();
+    const amountValue = String(formData.get('refundAmount') ?? '').trim();
     if (!reason) {
       setError('Enter a refund reason.');
       return;
     }
-    void runAction(() => refundPayment(payment.id, reason), 'Refund request submitted. The displayed state comes from the server/provider.');
+    const parsedAmountMinor = amountValue ? parseMajorAmount(amountValue, payment.currency) : undefined;
+    if (parsedAmountMinor === null) {
+      setError(`Enter a valid amount in ${payment.currency}.`);
+      return;
+    }
+    const amountMinor = parsedAmountMinor ?? undefined;
+    if (!user) {
+      setError('Sign in before requesting a refund.');
+      return;
+    }
+    const idempotencyKey = getRefundIdempotencyKey(user.uid, payment.id, refundInProgress);
+    void runAction(
+      () => refundPayment(payment.id, reason, idempotencyKey, amountMinor),
+      'Refund request submitted. The displayed state comes from the server/provider.',
+    );
   };
 
   return (
@@ -267,8 +294,15 @@ export function PaymentDetail({ paymentId }: Props) {
         </div>
         <div className="border-t border-mp-warm-grey pt-4 sm:border-l sm:pl-5">
           <p className="mp-kicker">Settlement</p>
-          <p className="mt-2 text-sm">{payment.status === 'completed' ? 'Capture confirmed by PayPal sandbox' : 'No completed capture recorded'}</p>
+          <p className="mt-2 text-sm">
+            {['completed', 'partially_refunded', 'refunded'].includes(payment.status)
+              ? 'Capture confirmed by PayPal sandbox'
+              : 'No completed capture recorded'}
+          </p>
           {payment.completedAt && <p className="mt-1 text-xs text-mp-medium-grey">{formatDate(payment.completedAt)}</p>}
+          {payment.providerCaptureId && (
+            <p className="mt-2 break-all text-xs text-mp-medium-grey">Capture reference: {payment.providerCaptureId}</p>
+          )}
           {isSafeReceiptUrl(payment.receiptUrl) && (
             <a href={payment.receiptUrl} target="_blank" rel="noopener noreferrer" className="mt-2 inline-flex items-center gap-2 text-sm font-semibold underline">
               View provider receipt <ExternalLink size={14} aria-hidden="true" />
@@ -276,6 +310,30 @@ export function PaymentDetail({ paymentId }: Props) {
           )}
         </div>
       </section>
+
+      {payment.providerCaptureId && ['completed', 'partially_refunded', 'refunded'].includes(payment.status) && (
+        <section className="border border-mp-warm-grey bg-mp-surface p-5" aria-labelledby="payment-receipt-heading">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h2 id="payment-receipt-heading" className="text-lg font-semibold">Payment receipt</h2>
+              <p className="mp-copy mt-1 text-sm">
+                Transaction record from the provider-confirmed capture; this is not a provider-hosted receipt.
+              </p>
+            </div>
+            <Button type="button" variant="outline" onClick={() => window.print()}>
+              Print receipt
+            </Button>
+          </div>
+          <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+            <div><dt className="font-semibold">Payment ID</dt><dd className="break-all">{payment.id}</dd></div>
+            <div><dt className="font-semibold">Provider</dt><dd>PayPal sandbox</dd></div>
+            <div><dt className="font-semibold">Captured amount</dt><dd>{formatMinorAmount(payment.amountMinor, payment.currency)}</dd></div>
+            <div><dt className="font-semibold">Refunded amount</dt><dd>{formatMinorAmount(payment.refundedAmountMinor, payment.currency)}</dd></div>
+            <div><dt className="font-semibold">Capture reference</dt><dd className="break-all">{payment.providerCaptureId}</dd></div>
+            <div><dt className="font-semibold">Capture date</dt><dd>{formatDate(payment.completedAt)}</dd></div>
+          </dl>
+        </section>
+      )}
 
       {(payment.status === 'pending' || payment.status === 'created') && isSafeApprovalUrl(payment.approvalUrl) && (
         <section className="border-l-2 border-mp-orange bg-mp-surface p-5">
@@ -305,6 +363,25 @@ export function PaymentDetail({ paymentId }: Props) {
           <h2 id="payment-actions-heading" className="text-xl font-semibold">Available actions</h2>
         </div>
         {!isPayer && <p className="mp-copy text-sm">Only the approved payer account can authorize, capture, cancel, or refund this payment.</p>}
+
+        {refundInProgress && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-l-2 border-sky-700 bg-mp-surface px-4 py-3 text-sm" role="status">
+            <span>A refund is awaiting provider confirmation. The mandate ledger will not change until the provider confirms it.</span>
+            {isPayer && pendingRefund && user && (
+              <Button type="button" variant="outline" disabled={busy} onClick={() => void runAction(
+                () => refundPayment(
+                  payment.id,
+                  pendingRefund.reason,
+                  getRefundIdempotencyKey(user.uid, payment.id, true),
+                  pendingRefund.amountMinor,
+                ),
+                'Refund status was refreshed from the server/provider.',
+              )}>
+                Retry refund status
+              </Button>
+            )}
+          </div>
+        )}
 
         {canAuthorize && (
           <div className="flex flex-wrap items-center justify-between gap-3 border border-mp-warm-grey bg-mp-surface p-4">
@@ -398,8 +475,27 @@ export function PaymentDetail({ paymentId }: Props) {
               submitRefund(new FormData(event.currentTarget));
             }}
           >
-            <label className="block text-sm font-semibold" htmlFor="refund-reason">Request full refund</label>
-            <p className="mp-copy mt-1 text-sm">The server requests a provider refund for the full captured amount and updates the ledger only after confirmation.</p>
+            <label className="block text-sm font-semibold" htmlFor="refund-amount">Refund amount (optional)</label>
+            <p className="mp-copy mt-1 text-sm">
+              Leave blank to refund the remaining {formatMinorAmount(remainingRefundableMinor, payment.currency)}.
+              The mandate ledger changes only after provider confirmation.
+            </p>
+            <input
+              id="refund-amount"
+              name="refundAmount"
+              type="number"
+              inputMode="decimal"
+              min={1 / (10 ** currencyFractionDigits(payment.currency))}
+              max={remainingRefundableMinor / (10 ** currencyFractionDigits(payment.currency))}
+              step={currencyFractionDigits(payment.currency) === 0
+                ? '1'
+                : (1 / (10 ** currencyFractionDigits(payment.currency))).toString()}
+              value={refundAmount}
+              onChange={(event) => setRefundAmount(event.target.value)}
+              className="mt-3 min-h-10 w-full rounded-md border border-mp-warm-grey bg-white px-3 text-sm"
+              placeholder={`Up to ${formatMinorAmount(remainingRefundableMinor, payment.currency)}`}
+            />
+            <label className="mt-3 block text-sm font-semibold" htmlFor="refund-reason">Refund reason</label>
             <input
               id="refund-reason"
               name="refundReason"
@@ -439,16 +535,32 @@ export function PaymentDetail({ paymentId }: Props) {
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="mp-kicker">Audit trail</p>
-            <h2 id="payment-history-heading" className="mt-1 text-xl font-semibold">Provider and payment history</h2>
+            <h2 id="payment-history-heading" className="mt-1 text-xl font-semibold">Payment and refund history</h2>
           </div>
-          <Badge variant={payment.status === 'completed' ? 'success' : 'info'}>
-            {events.length} events
+          <Badge variant={['completed', 'partially_refunded', 'refunded'].includes(payment.status) ? 'success' : 'info'}>
+            {events.length} events · {refunds.length} refunds
           </Badge>
         </div>
-        {events.length === 0 ? (
+        {events.length === 0 && refunds.length === 0 ? (
           <p className="mp-empty-state mt-4 p-5 text-sm text-mp-medium-grey">No payment events have been recorded.</p>
         ) : (
           <ol className="mt-4 border-l border-mp-warm-grey">
+            {refunds.map((refund) => (
+              <li key={`refund-${refund.id}`} className="relative ml-5 border-b border-mp-warm-grey py-4 last:border-0">
+                <span className="absolute -left-[1.55rem] top-5 h-2 w-2 rounded-full bg-mp-orange" aria-hidden="true" />
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <h3 className="font-semibold">Refund {refund.status}</h3>
+                    <p className="mp-copy mt-1 text-sm">{refund.reason}</p>
+                    {refund.providerRefundId && (
+                      <p className="mt-1 break-all text-xs text-mp-medium-grey">Provider refund: {refund.providerRefundId}</p>
+                    )}
+                    <p className="mt-1 text-xs text-mp-medium-grey">{formatDate(refund.createdAt)}</p>
+                  </div>
+                  <p className="text-sm font-semibold">{formatMinorAmount(refund.amountMinor, refund.currency)}</p>
+                </div>
+              </li>
+            ))}
             {events.map((event) => (
               <li key={event.id} className="relative ml-5 border-b border-mp-warm-grey py-4 last:border-0">
                 <span className="absolute -left-[1.55rem] top-5 h-2 w-2 rounded-full bg-mp-orange" aria-hidden="true" />

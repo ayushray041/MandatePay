@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { authenticatedApiRequest } from '@/lib/api/client';
 import {
   paymentEventSchema,
+  paymentRefundRecordSchema,
   paymentRecordSchema,
   type PaymentRecord,
 } from '@/models/payment';
@@ -11,6 +12,7 @@ import {
 const paymentDetailSchema = z.object({
   payment: paymentRecordSchema,
   events: z.array(paymentEventSchema),
+  refunds: z.array(paymentRefundRecordSchema),
 }).strict();
 
 export type PaymentDetail = z.infer<typeof paymentDetailSchema>;
@@ -40,6 +42,23 @@ export function getPaymentIdempotencyKey(
 ): string {
   const key = `mandatepay:payment:${userId}:${contractId}`;
   if (!startNewCycle) {
+    const existing = window.localStorage.getItem(key);
+    if (existing) {
+      return existing;
+    }
+  }
+  const idempotencyKey = window.crypto.randomUUID();
+  window.localStorage.setItem(key, idempotencyKey);
+  return idempotencyKey;
+}
+
+export function getRefundIdempotencyKey(
+  userId: string,
+  paymentId: string,
+  refundPending: boolean,
+): string {
+  const key = `mandatepay:refund:${userId}:${paymentId}`;
+  if (refundPending) {
     const existing = window.localStorage.getItem(key);
     if (existing) {
       return existing;
@@ -93,11 +112,20 @@ export function cancelPayment(paymentId: string, reason: string): Promise<Paymen
   );
 }
 
-export function refundPayment(paymentId: string, reason: string): Promise<PaymentRecord> {
+export function refundPayment(
+  paymentId: string,
+  reason: string,
+  idempotencyKey: string,
+  amountMinor?: number,
+): Promise<PaymentRecord> {
   return authenticatedApiRequest(
     `/api/payments/${encodeURIComponent(paymentId)}/refund`,
     paymentRecordSchema,
-    { method: 'POST', body: JSON.stringify({ reason }) },
+    {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ reason, ...(amountMinor === undefined ? {} : { amountMinor }) }),
+    },
     'Payment refund could not be confirmed.',
   );
 }

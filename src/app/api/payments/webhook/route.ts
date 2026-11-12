@@ -9,6 +9,7 @@ import { PaymentError, paymentErrorResponse } from '@/lib/payments/errors';
 import { recordMarketplaceCaptureOutcome } from '@/lib/marketplace/metrics';
 import {
   PaymentProviderError,
+  validatedPayPalReceiptUrl,
   verifyPayPalWebhookSignature,
 } from '@/lib/payments/paypal';
 import { parseMajorAmount } from '@/lib/mandates/money';
@@ -68,6 +69,25 @@ function hasExpectedAmount(resource: StoredData, payment: StoredData): boolean {
   }
   return amount.currency_code === payment.currency
     && parseMajorAmount(amount.value, amount.currency_code) === payment.amountMinor;
+}
+
+function refundAmount(resource: StoredData): { amountMinor: number; currency: string } | null {
+  const amount = asRecord(resource.amount);
+  if (typeof amount?.value !== 'string' || typeof amount.currency_code !== 'string') {
+    return null;
+  }
+  const amountMinor = parseMajorAmount(amount.value, amount.currency_code);
+  return amountMinor === null ? null : { amountMinor, currency: amount.currency_code };
+}
+
+function providerReceiptUrl(resource: StoredData): string | null {
+  if (!Array.isArray(resource.links)) {
+    return null;
+  }
+  const receiptLink = resource.links
+    .map(asRecord)
+    .find((link) => link?.rel === 'receipt');
+  return validatedPayPalReceiptUrl(receiptLink?.href);
 }
 
 function captureAttemptNumber(payment: StoredData): number {
@@ -171,7 +191,11 @@ async function applyWebhookEvent(
   const resourceId = typeof resource.id === 'string' ? resource.id : '';
 
   if (event.event_type === 'PAYMENT.AUTHORIZATION.CREATED') {
-    if (payment.status === 'completed' || payment.status === 'refunded') {
+    if (
+      payment.status === 'completed'
+      || payment.status === 'partially_refunded'
+      || payment.status === 'refunded'
+    ) {
       return { outcome: 'already_applied', paymentId: paymentRef.id };
     }
     if (!resourceId || !amountMatches) {
@@ -206,7 +230,12 @@ async function applyWebhookEvent(
   }
 
   if (event.event_type === 'PAYMENT.AUTHORIZATION.VOIDED') {
-    if (payment.status === 'cancelled' || payment.status === 'completed' || payment.status === 'refunded') {
+    if (
+      payment.status === 'cancelled'
+      || payment.status === 'completed'
+      || payment.status === 'partially_refunded'
+      || payment.status === 'refunded'
+    ) {
       return { outcome: 'already_applied', paymentId: paymentRef.id };
     }
     if (
@@ -231,20 +260,62 @@ async function applyWebhookEvent(
   }
 
   if (event.event_type === 'PAYMENT.CAPTURE.REFUNDED') {
-    if (payment.status === 'refunded' && payment.providerRefundId === resourceId) {
+    const pendingRefundId = payment.pendingRefundId;
+    const parsedRefundAmount = refundAmount(resource);
+    if (!resourceId || !parsedRefundAmount) {
+      addPaymentEvent(firestore, transaction, paymentRef, event, payment, {
+        failureCode: 'PAYMENT_REFUND_REQUIRES_RECONCILIATION',
+      }, 'payment.webhook_processed', 'refund_mismatch');
+      return { outcome: 'reconciliation_required', paymentId: paymentRef.id };
+    }
+    const providerRefundRef = paymentRef.collection('providerRefunds')
+      .doc(createHash('sha256').update(resourceId).digest('hex'));
+    const providerRefundSnapshot = await transaction.get(providerRefundRef);
+    const providerRefund = providerRefundSnapshot.data();
+    if (providerRefund?.status === 'completed') {
+      if (
+        providerRefund.amountMinor !== parsedRefundAmount.amountMinor
+        || providerRefund.currency !== parsedRefundAmount.currency
+      ) {
+        addPaymentEvent(firestore, transaction, paymentRef, event, payment, {
+          failureCode: 'PAYMENT_REFUND_REQUIRES_RECONCILIATION',
+        }, 'payment.webhook_processed', 'refund_duplicate_mismatch');
+        return { outcome: 'reconciliation_required', paymentId: paymentRef.id };
+      }
       return { outcome: 'already_applied', paymentId: paymentRef.id };
     }
-    const refundInProgress =
-      payment.status === 'processing' && payment.pendingOperation === 'refund';
     if (
-      (payment.status !== 'completed' && !refundInProgress)
-      || !resourceId
-      || !amountMatches
+      typeof pendingRefundId !== 'string'
+      || !/^[a-f0-9]{64}$/.test(pendingRefundId)
+      || payment.status !== 'processing'
+      || payment.pendingOperation !== 'refund'
       || (typeof related.capture_id === 'string' && related.capture_id !== payment.providerCaptureId)
+      || parsedRefundAmount.currency !== payment.currency
+      || typeof payment.pendingRefundAmountMinor !== 'number'
+      || !Number.isSafeInteger(payment.pendingRefundAmountMinor)
+      || payment.pendingRefundAmountMinor !== parsedRefundAmount.amountMinor
+      || (providerRefundSnapshot.exists && providerRefund?.refundKeyHash !== pendingRefundId)
     ) {
       addPaymentEvent(firestore, transaction, paymentRef, event, payment, {
         failureCode: 'PAYMENT_REFUND_REQUIRES_RECONCILIATION',
       }, 'payment.webhook_processed', 'refund_mismatch');
+      return { outcome: 'reconciliation_required', paymentId: paymentRef.id };
+    }
+    const refundRef = paymentRef.collection('refunds').doc(pendingRefundId);
+    const refundSnapshot = await transaction.get(refundRef);
+    const refund = refundSnapshot.data();
+    if (
+      !refundSnapshot.exists
+      || !refund
+      || !['processing', 'pending'].includes(String(refund.status))
+      || typeof refund.amountMinor !== 'number'
+      || !Number.isSafeInteger(refund.amountMinor)
+      || refund.amountMinor !== parsedRefundAmount.amountMinor
+      || (typeof refund.providerRefundId === 'string' && refund.providerRefundId !== resourceId)
+    ) {
+      addPaymentEvent(firestore, transaction, paymentRef, event, payment, {
+        failureCode: 'PAYMENT_REFUND_REQUIRES_RECONCILIATION',
+      }, 'payment.webhook_processed', 'refund_record_mismatch');
       return { outcome: 'reconciliation_required', paymentId: paymentRef.id };
     }
     const context = await loadPaymentLedgerContext(firestore, transaction, payment);
@@ -258,29 +329,80 @@ async function applyWebhookEvent(
       payerMandate.ownerId !== payment.payerId
       || typeof spentAmountMinor !== 'number'
       || !Number.isSafeInteger(spentAmountMinor)
-      || spentAmountMinor < Number(payment.amountMinor)
+      || spentAmountMinor < parsedRefundAmount.amountMinor
     ) {
       throw new PaymentError(409, 'INVALID_PAYMENT_LEDGER', 'Refund cannot be reconciled with mandate spending.');
     }
+    const totalAmountMinor = payment.amountMinor;
+    const alreadyRefundedMinor = payment.refundedAmountMinor === undefined
+      ? 0
+      : payment.refundedAmountMinor;
+    if (
+      typeof totalAmountMinor !== 'number'
+      || !Number.isSafeInteger(totalAmountMinor)
+      || totalAmountMinor <= 0
+      || typeof alreadyRefundedMinor !== 'number'
+      || !Number.isSafeInteger(alreadyRefundedMinor)
+      || alreadyRefundedMinor < 0
+    ) {
+      addPaymentEvent(firestore, transaction, paymentRef, event, payment, {
+        failureCode: 'PAYMENT_REFUND_REQUIRES_RECONCILIATION',
+      }, 'payment.webhook_processed', 'refund_total_mismatch');
+      return { outcome: 'reconciliation_required', paymentId: paymentRef.id };
+    }
+    const totalRefunded = alreadyRefundedMinor + parsedRefundAmount.amountMinor;
+    if (totalRefunded > totalAmountMinor) {
+      addPaymentEvent(firestore, transaction, paymentRef, event, payment, {
+        failureCode: 'PAYMENT_REFUND_REQUIRES_RECONCILIATION',
+      }, 'payment.webhook_processed', 'refund_total_mismatch');
+      return { outcome: 'reconciliation_required', paymentId: paymentRef.id };
+    }
     const timestamp = getServerTimestamp();
-    const refundId = typeof resourceId === 'string' ? resourceId : '';
     transaction.update(firestore.collection('mandates').doc(String(payment.payerMandateId)), {
-      spentAmountMinor: spentAmountMinor - Number(payment.amountMinor),
+      spentAmountMinor: spentAmountMinor - parsedRefundAmount.amountMinor,
       updatedAt: timestamp,
     });
+    const status = totalRefunded === totalAmountMinor ? 'refunded' : 'partially_refunded';
+    transaction.update(refundRef, {
+      status: 'completed',
+      providerRefundId: resourceId,
+      completedAt: timestamp,
+      updatedAt: timestamp,
+    });
+    if (providerRefundSnapshot.exists) {
+      transaction.update(providerRefundRef, {
+        status: 'completed',
+        refundKeyHash: pendingRefundId,
+        amountMinor: parsedRefundAmount.amountMinor,
+        currency: parsedRefundAmount.currency,
+        updatedAt: timestamp,
+      });
+    } else {
+      transaction.create(providerRefundRef, {
+        status: 'completed',
+        refundKeyHash: pendingRefundId,
+        amountMinor: parsedRefundAmount.amountMinor,
+        currency: parsedRefundAmount.currency,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      });
+    }
     addPaymentEvent(firestore, transaction, paymentRef, event, payment, {
-      status: 'refunded',
+      status,
       pendingOperation: null,
-      providerRefundId: refundId,
-      refundedAt: timestamp,
+      pendingRefundId: null,
+      pendingRefundAmountMinor: null,
+      refundedAmountMinor: totalRefunded,
+      providerRefundId: resourceId,
+      ...(status === 'refunded' ? { refundedAt: timestamp } : {}),
       failureCode: null,
-    }, 'payment.refunded', 'refunded');
-    return { outcome: 'refunded', paymentId: paymentRef.id };
+    }, status === 'refunded' ? 'payment.refunded' : 'payment.partially_refunded', status);
+    return { outcome: status, paymentId: paymentRef.id };
   }
 
   if (event.event_type === 'PAYMENT.CAPTURE.COMPLETED') {
     if (
-      (payment.status === 'completed' || payment.status === 'refunded')
+      (payment.status === 'completed' || payment.status === 'partially_refunded' || payment.status === 'refunded')
       && payment.providerCaptureId === resourceId
     ) {
       return { outcome: 'already_applied', paymentId: paymentRef.id };
@@ -352,6 +474,7 @@ async function applyWebhookEvent(
       status: 'completed',
       pendingOperation: null,
       providerCaptureId: resourceId,
+      receiptUrl: providerReceiptUrl(resource),
       completedAt: timestamp,
       failureCode: null,
     }, 'payment.completed', 'captured');
@@ -360,7 +483,7 @@ async function applyWebhookEvent(
 
   if (event.event_type === 'PAYMENT.CAPTURE.PENDING') {
     if (
-      (payment.status === 'completed' || payment.status === 'refunded')
+      (payment.status === 'completed' || payment.status === 'partially_refunded' || payment.status === 'refunded')
       && payment.providerCaptureId === resourceId
     ) {
       return { outcome: 'already_applied', paymentId: paymentRef.id };
@@ -390,7 +513,11 @@ async function applyWebhookEvent(
 
   if (event.event_type === 'PAYMENT.CAPTURE.DENIED') {
     if (
-      (payment.status === 'completed' || payment.status === 'refunded')
+      (
+        payment.status === 'completed'
+        || payment.status === 'partially_refunded'
+        || payment.status === 'refunded'
+      )
       && payment.providerCaptureId === resourceId
     ) {
       return { outcome: 'already_applied', paymentId: paymentRef.id };

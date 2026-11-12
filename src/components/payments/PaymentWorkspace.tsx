@@ -24,6 +24,7 @@ const statusClassNames: Record<PaymentStatus, string> = {
   authorized: 'border-violet-700 bg-violet-50 text-violet-800',
   processing: 'border-sky-700 bg-sky-50 text-sky-800',
   completed: 'border-emerald-700 bg-emerald-50 text-emerald-800',
+  partially_refunded: 'border-amber-700 bg-amber-50 text-amber-900',
   failed: 'border-red-700 bg-red-50 text-red-800',
   cancelled: 'border-mp-warm-grey bg-mp-app-bg text-mp-medium-grey',
   refunded: 'border-mp-warm-grey bg-mp-app-bg text-mp-medium-grey',

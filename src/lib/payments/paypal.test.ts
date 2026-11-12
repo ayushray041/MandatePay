@@ -38,6 +38,7 @@ import {
   createPayPalOrder,
   isPayPalConfigured,
   refundPayPalCapture,
+  validatedPayPalReceiptUrl,
   verifyPayPalWebhookSignature,
   voidPayPalAuthorization,
 } from '@/lib/payments/paypal';
@@ -103,7 +104,11 @@ describe('PayPal sandbox provider', () => {
     });
     mocks.voidPayment.mockResolvedValue({ statusCode: 204 });
     mocks.refundCapturedPayment.mockResolvedValue({
-      result: { id: 'REFUND123', status: 'COMPLETED' },
+      result: {
+        id: 'REFUND123',
+        status: 'COMPLETED',
+        amount: { currencyCode: 'USD', value: '1250.00' },
+      },
     });
     mocks.fetchToken.mockResolvedValue({ accessToken: 'sandbox-access-token' });
   });
@@ -175,7 +180,7 @@ describe('PayPal sandbox provider', () => {
     await expect(capturePayPalAuthorization({
       ...paymentInput,
       authorizationId: 'AUTH123',
-    })).resolves.toEqual({ captureId: 'CAPTURE123', status: 'COMPLETED' });
+    })).resolves.toEqual({ captureId: 'CAPTURE123', status: 'COMPLETED', receiptUrl: null });
 
     mocks.captureAuthorizedPayment.mockResolvedValueOnce({
       result: {
@@ -190,6 +195,14 @@ describe('PayPal sandbox provider', () => {
     })).rejects.toThrow('invalid capture response');
   });
 
+  it('accepts only HTTPS PayPal receipt links without embedded credentials', () => {
+    expect(validatedPayPalReceiptUrl('https://www.sandbox.paypal.com/receipt?id=123'))
+      .toBe('https://www.sandbox.paypal.com/receipt?id=123');
+    expect(validatedPayPalReceiptUrl('https://attacker.example/receipt')).toBeNull();
+    expect(validatedPayPalReceiptUrl('https://user@www.paypal.com/receipt')).toBeNull();
+    expect(validatedPayPalReceiptUrl('http://www.paypal.com/receipt')).toBeNull();
+  });
+
   it('uses idempotent sandbox operations for voids and refunds', async () => {
     await expect(voidPayPalAuthorization({
       paymentId: paymentInput.paymentId,
@@ -198,15 +211,64 @@ describe('PayPal sandbox provider', () => {
     await expect(refundPayPalCapture({
       paymentId: paymentInput.paymentId,
       captureId: 'CAPTURE123',
+      amountMinor: 125_000,
+      capturedAmountMinor: 125_000,
+      currency: 'USD',
       reason: 'Duplicate payment',
-    })).resolves.toEqual({ refundId: 'REFUND123', status: 'COMPLETED' });
+      refundKeyHash: 'a'.repeat(64),
+    })).resolves.toEqual({
+      refundId: 'REFUND123',
+      status: 'COMPLETED',
+      amountMinor: 125_000,
+      currency: 'USD',
+    });
 
     expect(mocks.voidPayment).toHaveBeenCalledWith(expect.objectContaining({
       paypalRequestId: expect.stringMatching(/^mp-[a-f0-9]{32}-void-1$/),
     }));
     expect(mocks.refundCapturedPayment).toHaveBeenCalledWith(expect.objectContaining({
       paypalRequestId: expect.stringMatching(/^mp-[a-f0-9]{32}-refund-1$/),
+      body: {},
     }));
+  });
+
+  it('sends an exact partial amount and rejects a provider refund amount mismatch', async () => {
+    mocks.refundCapturedPayment.mockResolvedValue({
+      result: {
+        id: 'REFUND-PARTIAL',
+        status: 'COMPLETED',
+        amount: { currencyCode: 'USD', value: '10.00' },
+      },
+    });
+    const input = {
+      paymentId: paymentInput.paymentId,
+      captureId: 'CAPTURE123',
+      amountMinor: 1_000,
+      capturedAmountMinor: 125_000,
+      currency: 'USD',
+      reason: 'Partial service issue',
+      refundKeyHash: 'b'.repeat(64),
+    };
+    await expect(refundPayPalCapture(input)).resolves.toMatchObject({
+      refundId: 'REFUND-PARTIAL',
+      amountMinor: 1_000,
+      currency: 'USD',
+    });
+    expect(mocks.refundCapturedPayment).toHaveBeenLastCalledWith(expect.objectContaining({
+      body: {
+        amount: { currencyCode: 'USD', value: '10.00' },
+        noteToPayer: 'Partial service issue',
+      },
+    }));
+
+    mocks.refundCapturedPayment.mockResolvedValueOnce({
+      result: {
+        id: 'REFUND-WRONG-AMOUNT',
+        status: 'COMPLETED',
+        amount: { currencyCode: 'USD', value: '11.00' },
+      },
+    });
+    await expect(refundPayPalCapture(input)).rejects.toThrow('invalid refund amount');
   });
 
   it('verifies webhook signatures with the sandbox verification endpoint and fails closed', async () => {

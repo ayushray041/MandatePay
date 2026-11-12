@@ -309,19 +309,25 @@ PayPal is pinned to its sandbox environment.
 |--------|------|---------|------------------|
 | GET | `/api/payments` | – | Lists up to 50 payments involving the caller. |
 | POST | `/api/payments` | `{ contractId }` and `Idempotency-Key` header | Creates or safely retries one sandbox authorization order for an active, approved contract. The verified payer must be the contract client. |
-| GET | `/api/payments/:paymentId` | – | Participant-only payment record and append-only event history. |
+| GET | `/api/payments/:paymentId` | – | Participant-only payment record, append-only event history, and up to 100 refund-operation records. |
 | POST | `/api/payments/:paymentId/authorize` | – | Confirms the PayPal authorization against the server-owned order and approved amount. |
 | POST | `/api/payments/:paymentId/capture` | `{ fulfillmentConfirmed: true }` | Requests provider capture after payer confirmation; only a verified provider result or webhook marks completion. |
 | POST | `/api/payments/:paymentId/cancel` | `{ reason }` | Voids an authorization before transactionally releasing both mandate reservations. An unapproved provider order cannot be canceled or have its reservation released. |
-| POST | `/api/payments/:paymentId/refund` | `{ reason }` | Requests a full refund of a provider-confirmed capture. Spending is reversed only on provider confirmation. |
+| POST | `/api/payments/:paymentId/refund` | `{ reason, amountMinor? }` and `Idempotency-Key` header | Requests a full refund of the remaining balance when `amountMinor` is omitted, or a partial refund in integer minor units. Only the payer may request it; cumulative refunds cannot exceed the provider-confirmed capture. At most 100 refund operations are recorded per payment. |
 | POST | `/api/payments/webhook` | Raw PayPal event JSON and transmission headers | Verifies the event through PayPal's sandbox signature-verification API, then processes supported authorization, capture, void, and refund events transactionally. Event IDs are durably deduplicated. |
 
-Payment status is one of `created`, `pending`, `authorized`, `processing`, `completed`, `failed`,
-`cancelled`, or `refunded`. Provider operations use stable idempotency request IDs; webhook updates
-and mandate-ledger changes are committed in the same Firestore transaction. A canceled payment can
-start a new cycle with a new idempotency key. Only full refunds are implemented. Unsupported or
-unmatched verified events are not applied to a payment; unmatched events receive a retryable service
-error. A browser redirect or client-reported success never marks a payment completed.
+Payment status is one of `created`, `pending`, `authorized`, `processing`, `completed`,
+`partially_refunded`, `failed`, `cancelled`, or `refunded`. Refund requests require a unique
+idempotency key; raw keys are not stored, and stable provider request IDs prevent duplicate provider
+refunds on retries. Refund operations are recorded separately and keyed by the hash of the verified
+payer and idempotency key. Provider refund IDs are also deduplicated, so a second webhook event ID
+cannot reverse spending twice. Cumulative refunds cannot exceed the original capture. The payer's
+spent ledger is reversed only after provider-confirmed completion, transactionally with payment,
+refund, and reconciliation records. `processing`/`pending` refunds do not change the ledger.
+Unsupported or unmatched verified events are not applied to a payment; unmatched events receive a
+retryable service error. A browser redirect or client-reported success never marks a payment
+completed. Receipt details are generated from the confirmed capture metadata; a provider-hosted
+receipt link is shown only when the provider supplies a validated HTTPS PayPal URL.
 
 Provider credentials are server-only. Configure sandbox `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`,
 `PAYPAL_WEBHOOK_ID`, and `APP_BASE_URL`; sandbox mode is fixed in the server adapter. No live

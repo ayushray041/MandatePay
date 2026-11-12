@@ -5,7 +5,7 @@ type RiskPayment = Pick<
   PaymentRecord,
   'id' | 'payerId' | 'payeeId' | 'amountMinor' | 'currency' | 'status' | 'createdAt' | 'completedAt'
   | 'serviceTitle'
->;
+> & Partial<Pick<PaymentRecord, 'refundedAmountMinor'>>;
 
 type AgentActivityEvidence = {
   action: string;
@@ -14,7 +14,12 @@ type AgentActivityEvidence = {
 
 const observationWindowDays = 30;
 const forecastHorizonDays = 30;
-const terminalPaymentStatuses = new Set<PaymentStatus>(['completed', 'failed', 'refunded']);
+const terminalPaymentStatuses = new Set<PaymentStatus>([
+  'completed',
+  'partially_refunded',
+  'failed',
+  'refunded',
+]);
 
 function median(values: number[]): number {
   const sorted = [...values].sort((left, right) => left - right);
@@ -171,15 +176,16 @@ export function forecastSpending(
   const from = now.getTime() - observationWindowDays * 24 * 60 * 60 * 1000;
   const completed = payments.filter((payment) => {
     const completedTime = Date.parse(payment.completedAt ?? '');
-    return payment.status === 'completed'
+      return (payment.status === 'completed' || payment.status === 'partially_refunded')
     && payment.currency === currency
       && Number.isSafeInteger(payment.amountMinor)
       && payment.amountMinor >= 0
+      && netAmount(payment) > 0
       && Number.isFinite(completedTime)
       && completedTime >= from
       && completedTime <= now.getTime();
   });
-  const total = completed.reduce((sum, payment) => sum + payment.amountMinor, 0);
+  const total = completed.reduce((sum, payment) => sum + netAmount(payment), 0);
   if (!Number.isSafeInteger(total) || completed.length === 0) {
     return baseAssessment('spending_forecast', completed.length, {
       summary: 'No completed payments in the observation window; a spending forecast is unavailable.',
@@ -204,6 +210,13 @@ export function forecastSpending(
   });
 }
 
+function netAmount(payment: RiskPayment): number {
+  const refunded = Number.isSafeInteger(payment.refundedAmountMinor)
+    ? Number(payment.refundedAmountMinor)
+    : payment.status === 'refunded' ? payment.amountMinor : 0;
+  return Math.max(0, payment.amountMinor - refunded);
+}
+
 export function assessVendorRisk(
   payments: RiskPayment[],
   vendorId: string,
@@ -213,7 +226,9 @@ export function assessVendorRisk(
     payment.payeeId === vendorId && payment.currency === currency
   ));
   const terminal = vendorPayments.filter(({ status }) => terminalPaymentStatuses.has(status));
-  const failures = terminal.filter(({ status }) => status === 'failed' || status === 'refunded').length;
+  const failures = terminal.filter(({ status }) => (
+    status === 'failed' || status === 'partially_refunded' || status === 'refunded'
+  )).length;
   const estimate = priceEstimate(vendorPayments);
   if (terminal.length < 3) {
     return baseAssessment('vendor_risk', terminal.length, {
@@ -227,7 +242,7 @@ export function assessVendorRisk(
     ? [{
         code: 'OBSERVED_PAYMENT_FAILURES',
         severity: score >= 40 ? 'high' : 'medium',
-        explanation: 'Observed failed or refunded payments are a limited, user-specific vendor signal.',
+        explanation: 'Observed failed or fully/partially refunded payments are a limited, user-specific vendor signal.',
         evidence: [
           `failed_or_refunded=${failures}`,
           `terminal_transactions=${terminal.length}`,

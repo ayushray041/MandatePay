@@ -4,6 +4,7 @@ import {
   paymentCaptureSchema,
   paymentCreateSchema,
   paymentRecordSchema,
+  paymentRefundSchema,
   paymentStatusSchema,
   paypalWebhookEventSchema,
 } from '@/models/payment';
@@ -27,6 +28,7 @@ const payment = {
   providerAuthorizationId: null,
   providerCaptureId: null,
   providerRefundId: null,
+  refundedAmountMinor: 0,
   pendingOperation: null,
   eventCount: 1,
   mandateApproval: { approverId: 'payer-1', approvedAt: '2026-11-12T00:00:00.000Z' },
@@ -71,5 +73,17 @@ describe('payment schemas', () => {
       resource: { id: 'AUTH-1' },
       create_time: '2026-11-12T00:00:00Z',
     }).success).toBe(true);
+  });
+
+  it('accepts only positive integer-minor-unit partial refund amounts', () => {
+    expect(paymentRefundSchema.safeParse({ reason: 'Partial refund' }).success).toBe(true);
+    expect(paymentRefundSchema.safeParse({ reason: 'Partial refund', amountMinor: 125 }).success).toBe(true);
+    expect(paymentRefundSchema.safeParse({ reason: 'Partial refund', amountMinor: 0 }).success).toBe(false);
+    expect(paymentRefundSchema.safeParse({ reason: 'Partial refund', amountMinor: 1.5 }).success).toBe(false);
+    expect(paymentRefundSchema.safeParse({
+      reason: 'Partial refund',
+      amountMinor: 125,
+      currency: 'USD',
+    }).success).toBe(false);
   });
 });

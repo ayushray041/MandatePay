@@ -52,7 +52,12 @@ export async function POST(request: Request, context: RouteContext) {
       if (payment.payerId !== uid) {
         throw new PaymentError(403, 'FORBIDDEN', 'Only the approved client account can authorize this payment.');
       }
-      if (payment.status === 'authorized' || payment.status === 'completed') {
+      if (
+        payment.status === 'authorized'
+        || payment.status === 'completed'
+        || payment.status === 'partially_refunded'
+        || payment.status === 'refunded'
+      ) {
         alreadyAuthorized = payment;
         return payment;
       }

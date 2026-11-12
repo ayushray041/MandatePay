@@ -137,6 +137,14 @@ service cloud.firestore {
       match /events/{eventId} {
         allow read, write: if false;
       }
+
+      match /refunds/{refundId} {
+        allow read, write: if false;
+      }
+
+      match /providerRefunds/{refundId} {
+        allow read, write: if false;
+      }
     }
 
     match /paypalWebhookEvents/{eventId} {

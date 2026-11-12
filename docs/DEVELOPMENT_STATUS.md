@@ -109,12 +109,12 @@
 
 ### Completed
 - Added a strict payment model, lifecycle event model, and sandbox-only PayPal Server SDK adapter. Provider amounts are created from server-derived integer minor units, and provider responses are checked before being persisted.
-- Implemented participant-scoped payment history and detail APIs, server-calculated initiation from an active approved contract, payer authorization, fulfillment-confirmed capture, cancellation/void, and full-refund operations.
+- Implemented participant-scoped payment history and detail APIs, server-calculated initiation from an active approved contract, payer authorization, fulfillment-confirmed capture, cancellation/void, and idempotent full/partial refund operations.
 - Added transaction-safe reservation consumption/release and refund ledger reversal. Provider calls use stable operation-specific request IDs and idempotent retries; a new request key starts a fresh cycle only after cancellation.
 - Added PayPal signature verification through the fixed sandbox verification endpoint, durable hashed webhook-event receipts, transactional capture/refund/void reconciliation, and fail-closed handling for invalid signatures, unmatched records, and amount/state conflicts.
 - Added server-only Firestore rules for payments, payment events, and webhook receipts, plus the composite participant/updated-time index for transaction history.
 - Replaced the payment placeholder with authenticated transaction history, eligible contract initiation, sandbox checkout return handling, payment details, state/timeline display, authorization/capture/cancel/refund actions, retry paths, and explicit loading/error/empty states.
-- Updated the API contracts, architecture, and database schema documentation. The UI displays a provider receipt only when a validated HTTPS PayPal receipt URL is present; no receipt is fabricated.
+- Updated the API contracts, architecture, and database schema documentation. The UI displays transaction receipt details only from a confirmed capture and links to a provider-hosted receipt only when a validated HTTPS PayPal URL is present; no provider receipt is fabricated.
 
 ### Verification
 - `npm test`: passed — 20 test files passed, 1 skipped; 91 tests passed, 3 skipped.
@@ -130,6 +130,29 @@
 - Direct client Firestore access remains denied; deploy the current Firestore rules and indexes to the authorized Firebase project.
 - npm reported 24 dependency audit findings during the PayPal SDK installation (19 moderate and 5 high); dependency audit remediation was not part of this phase.
 - Provider-supported receipt presentation is conditional; this integration does not manufacture receipts or guarantee availability.
+
+## Phase 7: Payment refund and reconciliation hardening
+
+### Completed
+- Added payer-authorized partial refunds in integer currency minor units; omitted amounts refund only the remaining captured balance. The server rejects non-positive, malformed, and cumulative-over-capture amounts.
+- Added request idempotency keys, stable PayPal request IDs, hashed per-refund records, and provider-refund-ID deduplication. Replayed API requests or separate webhook event IDs cannot reverse mandate spending twice.
+- Validated provider refund response amounts and currencies before applying ledger changes. Completed refund, payment, refund-history, provider-reconciliation, and mandate-ledger writes are atomic; pending refunds leave the ledger unchanged.
+- Reconciled partial/full provider refund webhooks against the single active refund operation, capture, currency, amount, and stored refund record. Unmatched/conflicting events are marked for reconciliation instead of being treated as success.
+- Added participant-visible refund history, remaining/refunded amounts, partial-refund status, safe retry of pending provider requests, and a printable transaction receipt based only on provider-confirmed capture metadata. Provider receipt links remain conditional on a validated provider URL.
+- Explicitly denied direct Firestore reads/writes for refund-operation and provider-refund reconciliation subcollections.
+
+### Verification
+- `npx tsc --noEmit`: passed.
+- `npm run lint`: passed.
+- Focused payment/refund/webhook/risk tests: passed — 5 files, 38 tests.
+- `npm test`: passed — 41 files passed, 1 skipped; 202 tests passed, 4 skipped.
+- `npm run build`: passed; payment pages and API routes compile in the production build.
+- Firestore emulator-backed rules validation remains skipped because `FIRESTORE_EMULATOR_HOST` is not configured.
+
+### Remaining blockers
+- No live or sandbox provider operations were executed. An authorized deployment must verify sandbox credentials, webhook registration/signatures, and provider refund behavior before rollout.
+- There is no scheduled provider-poll reconciliation worker. A request whose provider result is uncertain remains processing until a verified webhook arrives or the payer retries with the same idempotency key.
+- The browser receipt is printable transaction metadata, not a stored PDF or provider-issued receipt. A provider URL is shown only when PayPal supplies a validated receipt link.
 
 ## Phase 6: AI-powered negotiation intelligence
 

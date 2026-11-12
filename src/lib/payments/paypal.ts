@@ -35,11 +35,14 @@ export type PayPalAuthorizationDetails = {
 export type PayPalCaptureDetails = {
   captureId: string;
   status: 'COMPLETED' | 'PENDING' | 'FAILED' | 'DECLINED';
+  receiptUrl: string | null;
 };
 
 export type PayPalRefundDetails = {
   refundId: string;
   status: 'COMPLETED' | 'PENDING' | 'FAILED';
+  amountMinor: number;
+  currency: string;
 };
 
 function getCredentials() {
@@ -256,7 +259,32 @@ const captureResponseSchema = z.object({
   id: z.string().min(1),
   status: z.enum(['COMPLETED', 'PENDING', 'FAILED', 'DECLINED']),
   amount: moneyResponseSchema,
+  links: z.array(z.object({
+    rel: z.string(),
+    href: z.string().url(),
+  }).passthrough()).optional(),
 }).passthrough();
+
+export function validatedPayPalReceiptUrl(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  try {
+    const url = new URL(value);
+    if (
+      url.protocol !== 'https:'
+      || url.username
+      || url.password
+      || url.port
+      || !(url.hostname === 'paypal.com' || url.hostname.endsWith('.paypal.com'))
+    ) {
+      return null;
+    }
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
 
 export async function capturePayPalAuthorization(input: {
   paymentId: string;
@@ -287,7 +315,10 @@ export async function capturePayPalAuthorization(input: {
         'Sandbox provider returned an invalid capture response.',
       );
     }
-    return { captureId: parsed.data.id, status: parsed.data.status };
+    const receiptUrl = validatedPayPalReceiptUrl(
+      parsed.data.links?.find((link) => link.rel === 'receipt')?.href,
+    );
+    return { captureId: parsed.data.id, status: parsed.data.status, receiptUrl };
   } catch (error: unknown) {
     if (error instanceof PaymentProviderError) {
       throw error;
@@ -302,30 +333,69 @@ export async function capturePayPalAuthorization(input: {
 const refundResponseSchema = z.object({
   id: z.string().min(1),
   status: z.enum(['COMPLETED', 'PENDING', 'FAILED']),
+  amount: moneyResponseSchema,
 }).passthrough();
 
 export async function refundPayPalCapture(input: {
   paymentId: string;
   captureId: string;
+  amountMinor: number;
+  capturedAmountMinor: number;
+  currency: string;
   reason: string;
-  attempt?: number;
+  refundKeyHash: string;
   paymentCycle?: string;
 }): Promise<PayPalRefundDetails> {
   try {
+    const fractionDigits = currencyFractionDigits(input.currency);
+    if (
+      !Number.isSafeInteger(input.amountMinor)
+      || input.amountMinor <= 0
+      || !Number.isSafeInteger(input.capturedAmountMinor)
+      || input.amountMinor > input.capturedAmountMinor
+      || !/^[a-f0-9]{64}$/.test(input.refundKeyHash)
+    ) {
+      throw new PaymentProviderError('INVALID_REFUND', 'Refund amount or idempotency key is invalid.');
+    }
     const response = await new PaymentsController(createSandboxClient()).refundCapturedPayment({
       captureId: input.captureId,
-      paypalRequestId: requestIdentifier(input.paymentId, 'refund', input.attempt, input.paymentCycle),
+      paypalRequestId: requestIdentifier(
+        input.paymentId,
+        'refund',
+        1,
+        `${input.paymentCycle ?? ''}:${input.refundKeyHash}`,
+      ),
       prefer: 'return=representation',
-      body: { noteToPayer: input.reason.slice(0, 200) },
+      body: input.amountMinor < input.capturedAmountMinor
+        ? {
+          amount: {
+            currencyCode: input.currency,
+            value: (input.amountMinor / 10 ** fractionDigits).toFixed(fractionDigits),
+          },
+          noteToPayer: input.reason.slice(0, 200),
+        }
+        : {},
     });
     const parsed = refundResponseSchema.safeParse(response.result);
-    if (!parsed.success) {
+    const amountMinor = parsed.success
+      ? parseMajorAmount(parsed.data.amount?.value ?? '', parsed.data.amount?.currencyCode ?? '')
+      : null;
+    if (
+      !parsed.success
+      || amountMinor !== input.amountMinor
+      || parsed.data.amount?.currencyCode !== input.currency
+    ) {
       throw new PaymentProviderError(
         'PAYMENT_PROVIDER_INVALID_RESPONSE',
-        'Sandbox provider returned an invalid refund response.',
+        'Sandbox provider returned an invalid refund amount or response.',
       );
     }
-    return { refundId: parsed.data.id, status: parsed.data.status };
+    return {
+      refundId: parsed.data.id,
+      status: parsed.data.status,
+      amountMinor,
+      currency: input.currency,
+    };
   } catch (error: unknown) {
     if (error instanceof PaymentProviderError) {
       throw error;

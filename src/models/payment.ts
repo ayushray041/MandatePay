@@ -7,6 +7,7 @@ export const paymentStatuses = [
   'authorized',
   'processing',
   'completed',
+  'partially_refunded',
   'failed',
   'cancelled',
   'refunded',
@@ -28,6 +29,18 @@ export const paymentCancelSchema = z.object({
 
 export const paymentRefundSchema = z.object({
   reason: z.string().trim().min(1).max(500),
+  amountMinor: z.number().int().positive().max(100_000_000_000).optional(),
+}).strict();
+
+export const paymentRefundRecordSchema = z.object({
+  id: z.string().min(1),
+  amountMinor: z.number().int().positive().max(100_000_000_000),
+  currency: mandateCurrencySchema,
+  reason: z.string().min(1).max(500),
+  status: z.enum(['processing', 'pending', 'completed', 'failed']),
+  providerRefundId: z.string().min(1).nullable(),
+  createdAt: z.string().nullable(),
+  completedAt: z.string().nullable(),
 }).strict();
 
 export const paymentOperationSchema = z.enum([
@@ -56,6 +69,7 @@ export const paymentRecordSchema = z.object({
   providerAuthorizationId: z.string().min(1).nullable(),
   providerCaptureId: z.string().min(1).nullable(),
   providerRefundId: z.string().min(1).nullable(),
+  refundedAmountMinor: z.number().int().nonnegative().max(100_000_000_000),
   pendingOperation: paymentOperationSchema.nullable(),
   eventCount: z.number().int().positive(),
   mandateApproval: z.object({
@@ -95,6 +109,8 @@ export const paymentEventSchema = z.object({
     'payment.cancelled',
     'payment.refund_started',
     'payment.refunded',
+    'payment.partially_refunded',
+    'payment.refund_pending',
     'payment.failed',
     'payment.webhook_processed',
   ]),
@@ -113,5 +129,6 @@ export const paypalWebhookEventSchema = z.object({
 
 export type PaymentStatus = z.infer<typeof paymentStatusSchema>;
 export type PaymentRecord = z.infer<typeof paymentRecordSchema>;
+export type PaymentRefundRecord = z.infer<typeof paymentRefundRecordSchema>;
 export type PaymentEvent = z.infer<typeof paymentEventSchema>;
 export type PayPalWebhookEvent = z.infer<typeof paypalWebhookEventSchema>;
