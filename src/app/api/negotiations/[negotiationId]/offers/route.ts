@@ -172,6 +172,13 @@ export async function POST(request: Request, context: RouteContext) {
             'The previous offer no longer has a valid agent mandate.',
           );
         }
+        if (latestMandate.currency !== ownMandate.currency) {
+          throw new NegotiationError(
+            409,
+            'CURRENCY_MISMATCH',
+            'Both participant mandates must use the same currency.',
+          );
+        }
         assertMandateActive(latestMandate, latestAgentId, now);
         const previousTerms = currentOffer.terms as NegotiationOfferTerms;
         assertOfferWithinMandate(latestMandate, latestAgent, latestAgentId, previousTerms, now);

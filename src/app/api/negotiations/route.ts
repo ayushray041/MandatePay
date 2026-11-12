@@ -107,10 +107,26 @@ export async function POST(request: Request) {
         throw new NegotiationError(404, 'RECIPIENT_NOT_FOUND', 'Recipient agent was not found.');
       }
       const mandate = mandateSnapshot.data();
+      const initiatorAgent = initiatorAgentSnapshot.data();
+      const recipientAgent = recipientAgentSnapshot.data();
       if (!mandate) {
         throw new Error('Initiator mandate document has no data.');
       }
       assertMandateActive(mandate, uid, now);
+      if (
+        !initiatorAgent
+        || !Array.isArray(initiatorAgent.supportedCurrencies)
+        || !initiatorAgent.supportedCurrencies.includes(mandate.currency)
+        || !recipientAgent
+        || !Array.isArray(recipientAgent.supportedCurrencies)
+        || !recipientAgent.supportedCurrencies.includes(mandate.currency)
+      ) {
+        throw new NegotiationError(
+          409,
+          'CURRENCY_NOT_SUPPORTED',
+          'Both agents must support the initiator mandate currency.',
+        );
+      }
 
       const timestamp = getServerTimestamp();
       transaction.create(negotiationRef, {

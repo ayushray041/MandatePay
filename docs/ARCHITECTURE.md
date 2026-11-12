@@ -1,43 +1,55 @@
 ## Architecture Overview
 
-MandatePay is organized around three core backend services that run on Vercel serverless functions (or a dedicated Node.js backend if needed). All services share a common **Firebase** environment for authentication and data storage.
+MandatePay is a Next.js App Router application backed by Firebase Authentication and Firestore.
+The browser handles Firebase email/password sign-in and sends Firebase ID tokens to protected
+Route Handlers under `src/app/api/`. The server verifies each token, validates request data with
+Zod, and performs authorized Firestore operations with the Firebase Admin SDK.
 
-```
-src/
-├─ app/                     # Next.js App Router (frontend UI)
-│   ├─ layout.tsx
-│   └─ page.tsx
-├─ lib/                     # Shared utilities
-│   ├─ firebase.ts           # Firebase client init
-│   ├─ admin.ts              # Firebase Admin SDK init (server only)
-│   ├─ genai.ts              # Gemini client wrapper
-│   └─ paypal.ts             # PayPal SDK wrapper (server only)
-├─ services/                # Business‑logic layer
-│   ├─ contractIntelligence/ # Parsing & term extraction
-│   ├─ negotiation/          # Multi‑agent negotiation engine
-│   └─ payment/              # PayPal order creation, capture, void
-└─ models/                  # Zod schemas for request/response validation
-    ├─ contract.ts
-    ├─ negotiation.ts
-    └─ payment.ts
-```
+### Current implementation
 
-### Data Flow
-1. **User signs up or signs in** via Firebase Auth email/password (client-side, persisted locally). A verified ID token is sent to protected API routes; route guards provide UX redirects while APIs independently verify the token.
-2. **Mandate management** → owners create draft mandates naming an authorized agent, policy, budget, and execution window. Server APIs enforce lifecycle, ownership, approval, and budget constraints; Firestore stores the mandate and audit events.
-3. **Contract upload** → stored in Firestore (`contracts` collection) and optionally in Cloud Storage for PDF blobs.
-4. **Contract Intelligence Service** reads the raw contract, calls Gemini, returns a structured `ContractTerms` object validated by Zod.
-5. **Negotiation Service** creates two isolated agent contexts, each provided with the private mandate (generated server‑side). Agents exchange proposals via a persisted `negotiationRounds` sub‑collection. After ≤5 rounds the final proposal is stored as `amendments`.
-6. **Payment Service** creates a PayPal order (authorization) using the approved amendment amount (in integer cents). The order ID is saved in the amendment document. Capture is triggered by a backend webhook after delivery confirmation.
+1. **Authentication and profiles** — Firebase Auth provides signup, login, persisted browser
+   sessions, and logout. User profiles are provisioned server-side from verified token claims;
+   self-service role assignment cannot grant privileged roles.
+2. **Mandates** — owners create and manage spending mandates. Server policy enforces ownership,
+   assigned-agent authorization, lifecycle, time windows, permitted operations, approval rules,
+   execution conditions, and available budget. Every mandate change is recorded in immutable
+   audit logs.
+3. **Agents** — a registered freelancer profile is keyed by verified Firebase UID. It contains
+   capability, category, currency, and availability data. Discovery omits email and mandate data.
+4. **Negotiations** — two registered agents exchange deterministic offers and counters under their
+   private active mandates. The server validates every transition and persists append-only offer
+   and activity history. AI integration is intentionally separate and is not part of this flow.
 
-### Security Considerations
-- **Secrets** (Gemini API key, PayPal client secret, Firebase admin credentials) live only in Vercel environment variables and are accessed via server‑only code (`/src/app/api/...` routes). No secret is exposed to the browser.
-- **Private mandates** are generated on the server, stored encrypted (e.g., using `crypto.subtle` with a KMS‑managed key) and never sent to the opposite agent.
-- **Input validation** – every incoming JSON payload is validated with Zod before any business logic runs.
-- **Identity and authorization** – API identity is derived only from a verified Firebase ID token. Firestore Admin SDK calls bypass Security Rules, so API handlers must enforce ownership themselves.
-- **Mandate enforcement** – operation requests re-check active status, dates, allowed operation, per-operation conditions, approval requirements, and remaining budget inside Firestore transactions. Increasing a spending limit requires an authorized-agent request and a separate owner decision.
-- **Payment integrity** – amounts are stored as integer cents; the front‑end never trusts user‑provided amounts – the server recomputes the total from the amendment data.
-- **Firestore security rules** enforce that only the authenticated user can read/write their own contracts and that only admin service accounts may write payment status fields.
+### Negotiation and budget guarantees
 
----
-*For a deeper dive see the `docs/` files below.*
+- The initiating agent supplies an active mandate when creating a request. The recipient chooses
+  their own mandate on their first counteroffer or acceptance; it is not disclosed during discovery.
+- Each offer is validated against the submitting agent's active mandate, including currency,
+  operation permission, amount, remaining budget, and configured execution conditions.
+- Acceptance rechecks the latest offer against both mandates inside a Firestore transaction. The
+  same transaction reserves the accepted amount against both mandate budgets, preventing concurrent
+  acceptances from exceeding available limits.
+- Offer records and lifecycle events are stored in negotiation subcollections and are never edited.
+  Firestore rules deny direct client access; participant authorization is enforced by the API.
+- Negotiation expiry is recorded on the first attempted mutation after expiry; no scheduled expiry
+  worker is implemented.
+- Acceptance records agreement and a budget reservation only. It does not execute a service,
+  contract, payment, or external operation. A later execution integration must consume or release
+  that reservation under an explicit policy.
+
+### Security considerations
+
+- Firebase Admin credentials and other server secrets are used only by server-side modules and are
+  never sent to the browser.
+- Firebase ID tokens are verified server-side. The API derives identity only from verified claims;
+  client-supplied UIDs are not authorization inputs.
+- Firebase Admin SDK operations bypass Firestore Security Rules, so each Route Handler performs
+  its own participant and ownership checks. Rules deny direct client access to agent, mandate,
+  authorization, negotiation, offer, and event records.
+- All API input is validated with strict Zod schemas before business logic. Transactional state
+  changes protect against duplicate decisions and budget races.
+- The client route guard is an experience feature, not an API security boundary.
+
+Contract intelligence, amendments, payment processing, and webhook integrations remain planned
+work. See [API_CONTRACTS.md](./API_CONTRACTS.md), [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md), and
+[DEVELOPMENT_STATUS.md](./DEVELOPMENT_STATUS.md) for implementation and verification details.

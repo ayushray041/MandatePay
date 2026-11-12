@@ -24,7 +24,7 @@
 ### Remaining work
 - Run the emulator-backed rules tests under JDK 21.
 - Verify signup/login/profile creation against an authorized Firebase project and deploy `firestore.rules` plus `firestore.indexes.json` to that project.
-- Build the remaining contract, negotiation, amendment, and payment APIs; their planned contracts are documented in [API_CONTRACTS.md](./API_CONTRACTS.md).
+- Build the remaining contract-processing, amendment, and payment APIs; planned contracts are documented in [API_CONTRACTS.md](./API_CONTRACTS.md). Agent and negotiation workflows are implemented in Phase 3 below.
 
 ## Phase 2: Complete mandate management
 
@@ -47,3 +47,27 @@
 - Operation authorization validates and commits budget, but does not execute payments, create contracts, or invoke an external operation. Those integrations must consume approved authorizations in a later phase.
 - No live Firebase credentials or external service operations were used for verification. Deploy the updated Firestore rules and indexes to the authorized Firebase project before rollout.
 - Existing emulator-backed Firestore rules coverage still requires JDK 21+.
+
+## Phase 3: Agent-to-agent negotiation
+
+### Completed
+- Added server-owned agent registration, profile updates, and category-filtered discovery. Agent IDs and display names come from verified Firebase identity and the user profile; discovery omits email and mandate data.
+- Added private bilateral negotiation requests with offer submission, counteroffers, acceptance, rejection, cancellation, expiry, participant inbox/detail APIs, and an append-only offer and activity history.
+- Enforced state transitions and participant access in server routes. Offer and acceptance checks validate active mandates, currencies, allowed operations, spending limits, execution conditions, and remaining budget.
+- Made acceptance transactional and concurrency-safe: both active mandates are rechecked and the agreed amount is reserved against each mandate budget in the same transaction. A reservation records agreement only; it does not execute services, contracts, payments, or authorizations.
+- Added authenticated agent registration, agent discovery, negotiation inbox, request form, detail view, offer comparison, counteroffer and decision actions, timeline, status, expiry, and loading/error/empty states.
+- Updated Firestore rules to deny direct client access to agent and negotiation data, and documented the API and data model.
+
+### Verification
+- `npx tsc --noEmit`: passed.
+- `npm run lint`: passed.
+- `npm run build`: passed; Next.js generated the `/negotiations` inbox and dynamic detail route.
+- `npm test`: passed — 12 test files passed, 1 skipped; 52 tests passed, 3 skipped.
+- `git diff --check`: passed.
+- Firestore emulator rules tests were skipped because no `FIRESTORE_EMULATOR_HOST` was configured; starting the emulator in this environment previously failed because its Java runtime is older than the installed Firebase CLI's JDK 21 minimum.
+
+### Scope and remaining work
+- Negotiation expiry is recorded on the first attempted mutation after expiry; no scheduled expiry worker is included.
+- Accepted budget reservations remain reserved until a later explicit execution/settlement integration consumes or releases them. No release mechanism is implied or fabricated.
+- AI-assisted negotiation, contract processing, amendments, payment execution, and webhook integrations remain separate future work.
+- No live Firebase credentials or external service operations are used for local verification. Deploy the current Firestore rules and indexes to the authorized Firebase project before rollout.

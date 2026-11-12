@@ -84,4 +84,35 @@ describe.skipIf(!emulatorAddress)('Firestore security rules', () => {
     );
     await assertFails(getDoc(doc(aliceDb, 'payments/payment-1')));
   });
+
+  it('denies direct client access to agent and negotiation records and history', async () => {
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'agents/alice'), { uid: 'alice', displayName: 'Alice' });
+      await setDoc(doc(db, 'negotiations/negotiation-1'), {
+        initiatorAgentId: 'alice',
+        recipientAgentId: 'bob',
+      });
+      await setDoc(doc(db, 'negotiations/negotiation-1/offers/offer-1'), {
+        sequence: 1,
+        submittedByAgentId: 'alice',
+      });
+      await setDoc(doc(db, 'negotiations/negotiation-1/events/event-1'), {
+        sequence: 1,
+        actorAgentId: 'alice',
+      });
+    });
+
+    const aliceDb = environment.authenticatedContext('alice').firestore();
+    await assertFails(getDoc(doc(aliceDb, 'agents/alice')));
+    await assertFails(getDoc(doc(aliceDb, 'negotiations/negotiation-1')));
+    await assertFails(getDoc(doc(aliceDb, 'negotiations/negotiation-1/offers/offer-1')));
+    await assertFails(getDoc(doc(aliceDb, 'negotiations/negotiation-1/events/event-1')));
+    await assertFails(
+      setDoc(doc(aliceDb, 'negotiations/negotiation-2'), {
+        initiatorAgentId: 'alice',
+        recipientAgentId: 'bob',
+      }),
+    );
+  });
 });
