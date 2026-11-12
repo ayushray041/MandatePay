@@ -1,6 +1,7 @@
 # Security Review
 
-**Review date:** 2026-11-12  
+**Review date:** 2026-11-12
+
 **Scope:** Repository authentication, API authorization, mandate and negotiation approval flows,
 contract/payment transitions, Firestore rules/configuration, and secret handling. This is a
 code-based review, not a penetration test or a review of a live Firebase/PayPal deployment.
