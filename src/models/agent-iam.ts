@@ -4,6 +4,9 @@ export const agentApiScopes = [
   'agent:profile:read',
   'mandates:read',
   'mandates:authorize',
+  'workflows:read',
+  'workflows:execute',
+  'workflows:delegate',
 ] as const;
 
 export const agentApiScopeSchema = z.enum(agentApiScopes);

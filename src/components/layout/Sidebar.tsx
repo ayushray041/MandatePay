@@ -8,6 +8,7 @@ import {
   BriefcaseBusiness,
   FileCheck2,
   FileText,
+  GitBranch,
   LayoutDashboard,
   ShieldCheck,
   Store,
@@ -22,6 +23,7 @@ const links = [
   { href: '/amendments', label: 'Amendments', icon: FileCheck2 },
   { href: '/payments', label: 'Payments', icon: Wallet },
   { href: '/mandates', label: 'Mandates', icon: ShieldCheck },
+  { href: '/workflows', label: 'Workflows', icon: GitBranch },
   { href: '/agents', label: 'Agent Management', icon: Bot },
   { href: '/marketplace', label: 'Marketplace', icon: Store },
 ];

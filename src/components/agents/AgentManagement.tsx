@@ -149,6 +149,9 @@ export function AgentManagement() {
     if (formData.get('scope-profile') === 'on') scopes.push('agent:profile:read');
     if (formData.get('scope-read') === 'on') scopes.push('mandates:read');
     if (formData.get('scope-authorize') === 'on') scopes.push('mandates:authorize');
+    if (formData.get('scope-workflow-read') === 'on') scopes.push('workflows:read');
+    if (formData.get('scope-workflow-execute') === 'on') scopes.push('workflows:execute');
+    if (formData.get('scope-workflow-delegate') === 'on') scopes.push('workflows:delegate');
     const expiresAtValue = String(formData.get('expiresAt') ?? '');
     if (scopes.length === 0 || !expiresAtValue) {
       setError('Choose at least one permission and an expiration date.');
@@ -354,6 +357,18 @@ export function AgentManagement() {
                   <label className="flex items-center gap-2 text-sm">
                     <input type="checkbox" name="scope-authorize" /> Request operations within mandate policy
                   </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" name="scope-workflow-read" /> Read assigned workflow tasks
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" name="scope-workflow-execute" /> Claim tasks and report progress
+                  </label>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" name="scope-workflow-delegate" /> Hand off tasks to mandate-approved agents
+                  </label>
+                  <p className="text-xs text-mp-medium-grey">
+                    Workflow permissions never authorize payments, contracts, or mandate operations.
+                  </p>
                 </fieldset>
                 <Button type="submit" disabled={busy}>
                   <Plus size={16} aria-hidden="true" /> Create credential

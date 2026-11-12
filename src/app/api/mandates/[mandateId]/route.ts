@@ -3,6 +3,7 @@ import { authenticateRequest } from '@/lib/api/auth';
 import { apiError, apiSuccess } from '@/lib/api/responses';
 import { getServerTimestamp } from '@/lib/firebase/firestore';
 import { writeMandateAuditEvent } from '@/lib/mandates/audit';
+import { assertDelegatedAgentsRegistered } from '@/lib/mandates/delegation';
 import { MandateError, mandateErrorResponse } from '@/lib/mandates/errors';
 import { formatMandate, timestampToIso } from '@/lib/mandates/format';
 import {
@@ -186,6 +187,18 @@ export async function PATCH(request: Request, context: RouteContext) {
       });
       if (!merged.success) {
         throw new MandateError(400, 'INVALID_ARGUMENT', 'Combined mandate fields are invalid.');
+      }
+      if (
+        parsed.data.authorizedAgentId !== undefined
+        || parsed.data.executionConditions?.allowedDelegateAgentIds !== undefined
+        || parsed.data.executionConditions?.maximumDelegationDepth !== undefined
+      ) {
+        await assertDelegatedAgentsRegistered(
+          firestore,
+          transaction,
+          merged.data.authorizedAgentId,
+          merged.data.executionConditions.allowedDelegateAgentIds ?? [],
+        );
       }
 
       const approvalRequirements = merged.data.approvalRequirements;

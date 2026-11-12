@@ -56,12 +56,13 @@ function commaSeparated(value: FormDataEntryValue | null): string[] {
 const templates: Record<string, { label: string; conditions: MandateExecutionConditions }> = {
   basic: {
     label: 'General purchasing',
-    conditions: { requiredDescriptionTerms: [] },
+    conditions: { maximumDelegationDepth: 0, requiredDescriptionTerms: [] },
   },
   project: {
     label: 'Time-boxed project',
     conditions: {
       maximumContractDurationDays: 30,
+      maximumDelegationDepth: 0,
       allowedCategories: ['software'],
       requiredDescriptionTerms: ['project'],
     },
@@ -72,6 +73,7 @@ const templates: Record<string, { label: string; conditions: MandateExecutionCon
       recurringPeriod: 'monthly',
       recurringLimitMinor: 50_000,
       monthlyLimitMinor: 50_000,
+      maximumDelegationDepth: 0,
       requiredDescriptionTerms: [],
     },
   },
@@ -226,6 +228,8 @@ export function MandateForm({ initialMandate }: { initialMandate?: MandateRecord
             ?? initialMandate?.executionConditions.allowedCategories,
         allowedCountries: commaSeparated(formData.get('allowedCountries')),
         blockedCountries: commaSeparated(formData.get('blockedCountries')),
+        allowedDelegateAgentIds: commaSeparated(formData.get('allowedDelegateAgentIds')),
+        maximumDelegationDepth: Number(formData.get('maximumDelegationDepth') ?? 0),
         maximumContractDurationDays: String(formData.get('maximumContractDurationDays') ?? '').trim()
           ? Number(formData.get('maximumContractDurationDays'))
           : templateConditions?.maximumContractDurationDays
@@ -644,6 +648,34 @@ export function MandateForm({ initialMandate }: { initialMandate?: MandateRecord
                 </label>
               ))}
             </div>
+          </div>
+          <div className="grid gap-4 border-t border-mp-warm-grey pt-4 sm:grid-cols-2">
+            <label>
+              <span className="mp-label">Delegated agent IDs (optional, comma-separated)</span>
+              <input
+                name="allowedDelegateAgentIds"
+                maxLength={400}
+                defaultValue={initialMandate?.executionConditions.allowedDelegateAgentIds?.join(', ')}
+                className="mp-input mt-1 font-mono"
+                aria-describedby="delegation-help"
+              />
+              <span id="delegation-help" className="mt-1 block text-xs text-mp-medium-grey">
+                Use immutable agt_ IDs. Delegated agents can report workflow tasks only; this does not grant mandate authorization or payment access.
+              </span>
+            </label>
+            <label>
+              <span className="mp-label">Maximum delegation depth</span>
+              <select
+                name="maximumDelegationDepth"
+                defaultValue={initialMandate?.executionConditions.maximumDelegationDepth ?? 0}
+                className="mp-input mt-1"
+              >
+                <option value="0">No delegation</option>
+                <option value="1">One level</option>
+                <option value="2">Two levels</option>
+                <option value="3">Three levels</option>
+              </select>
+            </label>
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <label>

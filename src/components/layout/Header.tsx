@@ -15,6 +15,7 @@ const links = [
   { href: '/amendments', label: 'Amendments' },
   { href: '/payments', label: 'Payments' },
   { href: '/mandates', label: 'Mandates' },
+  { href: '/workflows', label: 'Workflows' },
   { href: '/agents', label: 'Agent Management' },
   { href: '/marketplace', label: 'Marketplace' },
 ];

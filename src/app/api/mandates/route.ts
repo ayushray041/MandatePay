@@ -5,6 +5,8 @@ import { getServerTimestamp } from '@/lib/firebase/firestore';
 import { mandateCreateSchema } from '@/models/mandate';
 import { formatMandate } from '@/lib/mandates/format';
 import { writeMandateAuditEvent } from '@/lib/mandates/audit';
+import { assertDelegatedAgentsRegistered } from '@/lib/mandates/delegation';
+import { MandateError, mandateErrorResponse } from '@/lib/mandates/errors';
 
 function validationDetails(issues: { path: PropertyKey[]; message: string }[]) {
   return issues.map((issue) => ({
@@ -157,6 +159,12 @@ export async function POST(request: Request) {
     };
 
     await firestore.runTransaction(async (transaction) => {
+      await assertDelegatedAgentsRegistered(
+        firestore,
+        transaction,
+        parsed.data.authorizedAgentId,
+        parsed.data.executionConditions.allowedDelegateAgentIds ?? [],
+      );
       transaction.create(mandateRef, mandate);
       transaction.create(initialVersionRef, {
         version: 1,
@@ -186,6 +194,9 @@ export async function POST(request: Request) {
 
     return apiSuccess(formatMandate(mandateRef.id, createdData), 201);
   } catch (error: unknown) {
+    if (error instanceof MandateError) {
+      return mandateErrorResponse(error);
+    }
     console.error('Failed to create mandate.', error);
     return apiError(500, 'INTERNAL_ERROR', 'Mandate could not be created.');
   }

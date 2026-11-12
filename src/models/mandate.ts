@@ -25,6 +25,7 @@ const minorUnitAmountSchema = z.number().int().positive().max(100_000_000_000);
 const nonnegativeMinorAmountSchema = z.number().int().nonnegative().max(100_000_000_000);
 const currencyCodes = new Set(Intl.supportedValuesOf('currency'));
 const userIdSchema = z.string().trim().min(1).max(128);
+const immutableAgentIdSchema = z.string().regex(/^agt_[A-Za-z0-9_-]{32}$/);
 const countryCodeSchema = z.string().regex(/^[A-Z]{2}$/);
 
 export const mandateCurrencySchema = z
@@ -88,6 +89,8 @@ export const mandateExecutionConditionsSchema = z.object({
   allowedCategories: z.array(agentCategorySchema).max(8).optional(),
   allowedCountries: z.array(countryCodeSchema).max(100).optional(),
   blockedCountries: z.array(countryCodeSchema).max(100).optional(),
+  allowedDelegateAgentIds: z.array(immutableAgentIdSchema).max(10).optional(),
+  maximumDelegationDepth: z.number().int().min(0).max(3).default(0),
   maximumContractDurationDays: z.number().int().min(1).max(3650).optional(),
   requiredDescriptionTerms: z.array(z.string().trim().min(1).max(80)).max(10).default([]),
 }).strict().superRefine((conditions, context) => {
@@ -118,6 +121,26 @@ export const mandateExecutionConditionsSchema = z.object({
       code: 'custom',
       path: ['recurringLimitMinor'],
       message: 'Recurring mandates require both a period and a recurring spending limit.',
+    });
+  }
+  if (
+    conditions.allowedDelegateAgentIds
+    && new Set(conditions.allowedDelegateAgentIds).size !== conditions.allowedDelegateAgentIds.length
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['allowedDelegateAgentIds'],
+      message: 'Delegated agent IDs must be unique.',
+    });
+  }
+  if (
+    conditions.maximumDelegationDepth > 0
+    && (conditions.allowedDelegateAgentIds?.length ?? 0) === 0
+  ) {
+    context.addIssue({
+      code: 'custom',
+      path: ['allowedDelegateAgentIds'],
+      message: 'Delegation depth requires at least one approved delegated agent.',
     });
   }
 });
