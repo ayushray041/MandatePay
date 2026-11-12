@@ -3,6 +3,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   authenticateRequest: vi.fn(),
   agentsQuery: { get: vi.fn() },
+  canViewMarketplaceDirectory: vi.fn(),
+  ensureMarketplaceViewer: vi.fn(),
+  marketplaceOwnerHasDirectoryAccess: vi.fn(),
+  parseMarketplaceDirectorySettings: vi.fn(),
   collection: vi.fn(),
   runTransaction: vi.fn(),
 }));
@@ -15,6 +19,12 @@ vi.mock('@/lib/firebase/admin', () => ({
 }));
 vi.mock('@/lib/api/auth', () => ({
   authenticateRequest: mocks.authenticateRequest,
+}));
+vi.mock('@/lib/marketplace/store', () => ({
+  canViewMarketplaceDirectory: mocks.canViewMarketplaceDirectory,
+  ensureMarketplaceViewer: mocks.ensureMarketplaceViewer,
+  marketplaceOwnerHasDirectoryAccess: mocks.marketplaceOwnerHasDirectoryAccess,
+  parseMarketplaceDirectorySettings: mocks.parseMarketplaceDirectorySettings,
 }));
 
 import { GET } from '@/app/api/agents/route';
@@ -47,12 +57,25 @@ describe('agent APIs', () => {
       authenticated: true,
       user: { uid: 'agent-1' },
     });
+    mocks.ensureMarketplaceViewer.mockResolvedValue({
+      uid: 'agent-1',
+      agentId: null,
+      organizationIds: new Set(),
+      allowlistedAgentIds: new Set(),
+      blocklistedAgentIds: new Set(),
+    });
+    mocks.canViewMarketplaceDirectory.mockReturnValue(true);
+    mocks.marketplaceOwnerHasDirectoryAccess.mockResolvedValue(true);
+    mocks.parseMarketplaceDirectorySettings.mockImplementation((settings) => settings);
     mocks.collection.mockImplementation((name: string) => {
       if (name === 'users') {
         return { doc: () => ({}) };
       }
       return {
-        doc: (uid: string) => ({ id: uid }),
+        doc: (uid: string) => ({
+          id: uid,
+          get: async () => ({ exists: false, data: () => undefined }),
+        }),
         where: () => ({
           orderBy: () => ({
             limit: () => mocks.agentsQuery,
@@ -66,7 +89,13 @@ describe('agent APIs', () => {
     mocks.agentsQuery.get.mockResolvedValue({
       docs: [{
         id: 'agent-2',
-        data: () => ({ ...validProfile, uid: 'forged-id', createdAt: null, updatedAt: null }),
+        data: () => ({
+          ...validProfile,
+          uid: 'forged-id',
+          status: 'active',
+          createdAt: null,
+          updatedAt: null,
+        }),
       }],
     });
   });
@@ -74,8 +103,8 @@ describe('agent APIs', () => {
   it('discovers profiles but never returns the caller as a counterpart', async () => {
     mocks.agentsQuery.get.mockResolvedValueOnce({
       docs: [
-        { id: 'agent-1', data: () => validProfile },
-        { id: 'agent-2', data: () => validProfile },
+        { id: 'agent-1', data: () => ({ ...validProfile, status: 'active' }) },
+        { id: 'agent-2', data: () => ({ ...validProfile, status: 'active' }) },
       ],
     });
     const response = await GET(new Request('https://example.test/api/agents?category=software'));
@@ -90,6 +119,68 @@ describe('agent APIs', () => {
     const response = await GET(new Request('https://example.test/api/agents?category=unknown'));
     expect(response.status).toBe(400);
     expect(mocks.agentsQuery.get).not.toHaveBeenCalled();
+  });
+
+  it('does not expose a private agent through the legacy discovery endpoint', async () => {
+    mocks.agentsQuery.get.mockResolvedValueOnce({
+      docs: [{
+        id: 'agent-2',
+        data: () => ({
+          ...validProfile,
+          agentId: `agt_${'A'.repeat(32)}`,
+          status: 'active',
+        }),
+      }],
+    });
+    mocks.canViewMarketplaceDirectory.mockReturnValue(false);
+    mocks.collection.mockImplementation((name: string) => {
+      if (name === 'agentMarketplaceProfiles') {
+        return {
+          doc: () => ({
+            get: async () => ({
+              exists: true,
+              data: () => ({
+                agentId: `agt_${'A'.repeat(32)}`,
+                ownerId: 'agent-2',
+                directorySettings: {
+                  visibility: 'private',
+                  allowlistedAgentIds: [],
+                },
+              }),
+            }),
+          }),
+        };
+      }
+      if (name === 'agentIdentities') {
+        return {
+          doc: () => ({
+            get: async () => ({
+              exists: true,
+              data: () => ({ agentId: `agt_${'A'.repeat(32)}`, agentUid: 'agent-2' }),
+            }),
+          }),
+        };
+      }
+      return {
+        doc: (uid: string) => ({
+          id: uid,
+          get: async () => ({ exists: false, data: () => undefined }),
+        }),
+        where: () => ({
+          orderBy: () => ({
+            limit: () => mocks.agentsQuery,
+          }),
+        }),
+        orderBy: () => ({
+          limit: () => mocks.agentsQuery,
+        }),
+      };
+    });
+
+    const response = await GET(new Request('https://example.test/api/agents'));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ data: [] });
   });
 
   it('binds registration identity to the token and checks the account role', async () => {

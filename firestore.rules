@@ -39,6 +39,38 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /agentMarketplaceProfiles/{agentId} {
+      allow read, write: if false;
+    }
+
+    match /agentServiceListings/{listingId} {
+      allow read, write: if false;
+    }
+
+    match /marketplaceOrganizations/{organizationId} {
+      allow read, write: if false;
+
+      match /members/{uid} {
+        allow read, write: if false;
+      }
+    }
+
+    match /marketplacePreferences/{uid} {
+      allow read, write: if false;
+    }
+
+    match /marketplaceReviews/{reviewId} {
+      allow read, write: if false;
+    }
+
+    match /marketplaceAgentMetrics/{agentId} {
+      allow read, write: if false;
+    }
+
+    match /marketplacePaymentOutcomes/{outcomeId} {
+      allow read, write: if false;
+    }
+
     match /mandates/{mandateId} {
       allow read, write: if false;
     }

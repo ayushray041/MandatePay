@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   },
   documents: new Map<string, Record<string, unknown>>(),
   loadPaymentLedgerContext: vi.fn(),
+  recordMarketplaceCaptureOutcome: vi.fn(),
   verifyPayPalWebhookSignature: vi.fn(),
   writePaymentEvent: vi.fn(),
 }));
@@ -17,6 +18,9 @@ vi.mock('@/lib/payments/context', () => ({
   loadPaymentLedgerContext: mocks.loadPaymentLedgerContext,
 }));
 vi.mock('@/lib/payments/events', () => ({ writePaymentEvent: mocks.writePaymentEvent }));
+vi.mock('@/lib/marketplace/metrics', () => ({
+  recordMarketplaceCaptureOutcome: mocks.recordMarketplaceCaptureOutcome,
+}));
 vi.mock('@/lib/payments/paypal', () => ({
   verifyPayPalWebhookSignature: mocks.verifyPayPalWebhookSignature,
   PaymentProviderError: class PaymentProviderError extends Error {
@@ -220,5 +224,64 @@ describe('PayPal payment webhook', () => {
     });
     expect(mocks.loadPaymentLedgerContext).not.toHaveBeenCalled();
     expect([...mocks.documents.keys()]).not.toContain('mandates/mandate-payer');
+  });
+
+  it('does not count pending capture events as failed marketplace outcomes', async () => {
+    mocks.documents.set('payments/contract-1', {
+      contractId: 'contract-1',
+      participantIds: ['payer', 'payee'],
+      payerId: 'payer',
+      payeeId: 'payee',
+      amountMinor: 1_000,
+      currency: 'USD',
+      status: 'processing',
+      pendingOperation: 'capture',
+      providerOrderId: 'order-1',
+      attempts: { capture: 1 },
+      eventCount: 2,
+    });
+    const pendingEvent = {
+      ...captureEvent,
+      id: 'paypal-event-capture-pending',
+      event_type: 'PAYMENT.CAPTURE.PENDING',
+    };
+
+    const response = await receiveWebhook(request(pendingEvent));
+
+    expect(response.status).toBe(200);
+    expect(mocks.recordMarketplaceCaptureOutcome).not.toHaveBeenCalled();
+  });
+
+  it('records a denied capture as one failed marketplace outcome', async () => {
+    mocks.documents.set('payments/contract-1', {
+      contractId: 'contract-1',
+      participantIds: ['payer', 'payee'],
+      payerId: 'payer',
+      payeeId: 'payee',
+      amountMinor: 1_000,
+      currency: 'USD',
+      status: 'processing',
+      pendingOperation: 'capture',
+      providerOrderId: 'order-1',
+      attempts: { capture: 2 },
+      eventCount: 2,
+    });
+    const deniedEvent = {
+      ...captureEvent,
+      id: 'paypal-event-capture-denied',
+      event_type: 'PAYMENT.CAPTURE.DENIED',
+    };
+
+    const response = await receiveWebhook(request(deniedEvent));
+
+    expect(response.status).toBe(200);
+    expect(mocks.recordMarketplaceCaptureOutcome).toHaveBeenCalledWith(
+      mocks.firestore,
+      expect.anything(),
+      'payee',
+      'contract-1',
+      'failure',
+      'capture-failure-2',
+    );
   });
 });

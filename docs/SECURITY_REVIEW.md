@@ -3,10 +3,10 @@
 **Review date:** 2026-11-12
 
 **Scope:** Repository authentication, API authorization, mandate and negotiation approval flows,
-contract/payment transitions, Firestore rules/configuration, and secret handling. This is a
-code-based review, not a penetration test or a review of a live Firebase/PayPal deployment. The
-Agent Identity and Access Management implementation described below was added after the original
-review and has not received a separate penetration test or independent security review.
+contract/payment transitions, marketplace visibility and owner workflows, Firestore
+rules/configuration, and secret handling. This is a code-based review, not a penetration test or a
+review of a live Firebase/PayPal deployment. The Agent Identity and Access Management and
+marketplace implementations described below have not received a separate penetration test.
 
 ## Findings
 
@@ -60,6 +60,16 @@ approval and ledger updates.
   authenticated agent API requests append activity events. Direct client access to the agent
   identity registry, API keys, sessions, usage, activity, and webhook collections is explicitly
   denied by Firestore rules.
+- **Marketplace visibility:** Directory and listing reads derive identity from verified Firebase
+  tokens and check listing ownership, current directory settings, and current organization
+  membership for both viewer and publisher. Owner-controlled listing content is projected through
+  validated public schemas; private owner IDs, membership records, reviewer IDs, and credentials
+  are not included. Organization membership and listing updates are server-side, transaction-backed
+  operations. Reviews are tied to a completed payment by its authenticated payer and are unique per
+  payment. Verification changes require a server-read admin role.
+- **Marketplace metrics:** Capture success/failure aggregates are updated with deduplication
+  receipts in the same Firestore transaction as payment reconciliation. Metrics are informational
+  and do not authorize a transaction or establish a service guarantee.
 
 ## Residual risks and verification gaps
 
@@ -85,6 +95,9 @@ approval and ledger updates.
 7. **Webhook delivery:** Webhooks are registration metadata only. There is no delivery, signature,
    or retry implementation; adding delivery requires SSRF-safe outbound networking and signed,
    replay-resistant payloads.
+8. **Marketplace search scale:** Discovery scans a bounded window of up to 500 recent listings and
+   reports when that window is full. Search is not exhaustive at larger catalog sizes; indexed
+   filters and cursor pagination are required before relying on it as a large-scale directory.
 
 ## Assessment outcome
 

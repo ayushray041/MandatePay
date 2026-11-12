@@ -20,19 +20,25 @@ Zod, and performs authorized Firestore operations with the Firebase Admin SDK.
    middleware enforces key expiry/revocation, agent activation state, explicit scopes, transactional
    per-agent rate/quota counters, and server-side session state. Discovery exposes only capability
    information.
-4. **Negotiations** — two registered agents exchange deterministic offers and counters under their
+4. **Agent marketplace** — owners publish versioned service listings and choose public, private
+   agent-allowlist, or organization visibility. Firebase-authenticated discovery applies bounded
+   filters and pagination, with live checks for both viewer and publisher organization membership.
+   Owner-managed organizations, listing versions, validated capability documents, payment-eligible
+   reviews, admin verification, and payment-capture-backed aggregates are server-only Firestore
+   workflows. Public projections omit owner UIDs, organization membership data, and credentials.
+5. **Negotiations** — two registered agents exchange deterministic offers and counters under their
    private active mandates. The server validates every transition and persists append-only offer
    and activity history. AI assistance is a separate, participant-authorized advisory layer.
-5. **Contracts and amendments** — an accepted negotiation can produce one reviewable contract.
+6. **Contracts and amendments** — an accepted negotiation can produce one reviewable contract.
    The contract records the parties, mandates, agreed service and conditions. All required parties
    must approve before activation. Amendments are reviewed against current mandate authority and
    produce immutable versions with append-only audit events.
-6. **Sandbox payments** — an approved active contract can start a PayPal sandbox authorization
+7. **Sandbox payments** — an approved active contract can start a PayPal sandbox authorization
    order. Server APIs calculate the amount from the approved version, check both reservations, and
    manage authorization, capture, cancellation, and full-refund transitions. Verified provider
    webhooks reconcile payment state and mandate ledgers transactionally; durable event receipts
    prevent duplicate processing.
-7. **Negotiation intelligence** — a server-only Gemini provider supports recommendations, offer
+8. **Negotiation intelligence** — a server-only Gemini provider supports recommendations, offer
    commentary, history summaries, and contract-clause review. Responses are strict-Zod validated;
    offer suggestions are independently checked against the requesting agent's mandate. No model
    tools, payment APIs, mandate mutation APIs, or approval actions are available to the provider.
@@ -119,6 +125,16 @@ Zod, and performs authorized Firestore operations with the Firebase Admin SDK.
 - Per-agent requests-per-minute and UTC-day quotas share atomic Firestore counters across all
   credentials. Credential management and authenticated API requests append activity/security
   events without persisting raw keys, authorization headers, or request bodies.
+- Marketplace reads and writes go through authenticated APIs because Firebase Admin bypasses
+  Firestore rules. Public listing projections are explicit allowlisted schemas. Private and
+  organization visibility is rechecked on reads; organization listings disappear when either the
+  viewer or publisher loses membership. Review creation derives the recipient from a completed
+  payment and keys uniqueness on that payment. Capture outcomes update reliability/count metrics
+  with deduplication receipts in the same payment transaction.
+- Marketplace discovery currently scans at most 500 recent published listings and returns a
+  `truncated` indicator when that candidate window is full. This is bounded for safety but is not
+  an exhaustive or high-scale index-backed search; production growth requires indexed filters and
+  cursor-based pagination.
 - Webhook endpoint registration is metadata-only. No event delivery, payload signing, or retry
   worker is implemented; registered URLs are not fetched by the server.
 

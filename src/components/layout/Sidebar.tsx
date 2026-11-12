@@ -10,6 +10,7 @@ import {
   FileText,
   LayoutDashboard,
   ShieldCheck,
+  Store,
   Wallet,
 } from 'lucide-react';
 
@@ -22,6 +23,7 @@ const links = [
   { href: '/payments', label: 'Payments', icon: Wallet },
   { href: '/mandates', label: 'Mandates', icon: ShieldCheck },
   { href: '/agents', label: 'Agent Management', icon: Bot },
+  { href: '/marketplace', label: 'Marketplace', icon: Store },
 ];
 
 export const Sidebar: React.FC = () => {

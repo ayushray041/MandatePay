@@ -16,6 +16,15 @@ authenticated agent owner.
 | `agentUsage` | Immutable `agentId` | UTC minute/day window identifiers, request counters, `updatedAt` | Shared per-agent quota counters updated atomically across all keys. |
 | `agentActivity` | Auto ID | `ownerId`, `agentId`, actor, action, outcome, scope, request method/path, safe details, `createdAt` | Append-only agent activity and security events; raw credentials and request bodies are excluded. |
 | `agentWebhooks` | Auto ID | `ownerId`, `agentId`, HTTPS URL, subscribed event names, status, timestamps | Owner-managed webhook endpoint registrations. Delivery/signature generation is not enabled. |
+| `agentMarketplaceProfiles` | Immutable `agentId` | `agentId`, `ownerId`, directory visibility/allowlist/organization, admin verification status/reason, version and timestamps | Owner-controlled marketplace visibility and platform-managed verification; all access is through authorized APIs. |
+| `agentServiceListings` | Auto ID | `agentId`, private `ownerUid`, listing content/actions/pricing/SLA, visibility/organization, status, version, timestamps | Service catalog entries. New entries are drafts; search exposes published entries only after directory and organization membership checks. |
+| `agentServiceListings/{id}/versions` | Zero-padded version | `version`, `createdBy`, `createdAt`, full listing snapshot | Append-only service listing and visibility history, capped at 50 returned versions. |
+| `marketplaceOrganizations` | Auto ID | `name`, `ownerId`, timestamps | Server-managed private directory organization; owner association cannot be changed through the API. |
+| `marketplaceOrganizations/{id}/members` | Firebase `uid` | `uid`, `role`, `createdAt` | Owner-managed membership; owner additions require an existing user and membership is capped at 200. |
+| `marketplacePreferences` | Firebase `uid` | `ownerUid`, allowlisted and blocklisted immutable agent IDs, `updatedAt` | Per-user marketplace discovery filters. |
+| `marketplaceReviews` | SHA-256 of payment ID | `agentId`, `paymentId`, private `reviewerUid`, rating, comment, `createdAt` | One review per completed payment, submitted by its verified payer; only reviewer label and review content are public. |
+| `marketplaceAgentMetrics` | Immutable `agentId` | `reviewCount`, `ratingTotal`, completed transaction and capture outcome counts, `updatedAt` | Server-maintained aggregate marketplace ratings and payment-backed reliability metrics. |
+| `marketplacePaymentOutcomes` | SHA-256 of payment ID and outcome key | `paymentId`, `agentId`, outcome, `createdAt` | Deduplication receipt written transactionally with capture outcome metrics. |
 | `mandates` | Auto ID | `ownerId`, one `authorizedAgentId`, title and description, `durationType`, `startsAt`, nullable `expiresAt`, `spendingLimitMinor`, `spentAmountMinor`, negotiation `reservedAmountMinor`, pending-approval `authorizationReservedAmountMinor`, `velocityUsage`, currency, allowed operations, approval requirements (approver IDs, all/quorum), execution conditions, lifecycle/version, emergency suspension, renewal request, optional pending limit request, timestamps | Server-enforced spending authority. Budget and velocity counters are mutated transactionally; only the owner and assigned agent can access it through APIs. |
 | `mandates/{id}/versions` | Zero-padded version number | `version`, `createdBy`, `createdAt`, `reason`, complete `snapshot` | Append-only mandate policy/lifecycle snapshots. Direct client access is denied. |
 | `mandateAuthorizations` | Auto ID or SHA-256 idempotency key | `mandateId`, owner and assigned-agent IDs, operation, amount, currency, description, captured `mandateVersion`, approver IDs/quorum/approvals, pending reservation window keys, status, idempotency fingerprint, timestamps | Operation authorization requests and decisions. Pending requests reserve both total and UTC velocity budget transactionally; retries with the same idempotency key do not create duplicate reservations. Direct client access is denied. |
@@ -64,6 +73,8 @@ accepting client-provided identity or location.
 - Agent discovery by category and `updatedAt`.
 - Agent API key listing by `ownerId` and `createdAt`.
 - Agent session, activity, and webhook listings by owner/agent and their respective timestamps.
+- Marketplace listings by publication status/time, owner/time, and agent/status/time.
+- Marketplace reviews by agent/time and organization membership by UID (collection group).
 - Negotiation inbox queries by `initiatorAgentId` or `recipientAgentId`, ordered by `updatedAt`.
 - Contract participant listing by `participantIds` and `updatedAt`.
 - Payment history listing by `participantIds` and `updatedAt`.
@@ -77,8 +88,9 @@ Rules in `firestore.rules`:
 - Deny direct client reads and writes for agent profiles, identity registry, API credentials,
   sessions, usage counters, activity, webhook registrations, mandates, authorizations, negotiations,
   negotiation offers/events, contracts, contract versions, amendments, contract events, payments,
-  payment events, and webhook idempotency receipts. APIs perform identity, participant, and
-  ownership checks because Firebase Admin SDK access bypasses rules.
+  payment events, marketplace profiles/listings/organizations/members/preferences/reviews/metrics,
+  payment outcome receipts, and webhook idempotency receipts. APIs perform identity, participant,
+  visibility, and ownership checks because Firebase Admin SDK access bypasses rules.
 - Deny all other direct client access by default.
 
 The rules are configured by `firebase.json`. Emulator-backed rules tests require

@@ -9,6 +9,7 @@ import {
 import { writePaymentEvent } from '@/lib/payments/events';
 import { PaymentError, paymentErrorResponse } from '@/lib/payments/errors';
 import { formatPayment } from '@/lib/payments/format';
+import { recordMarketplaceCaptureOutcome } from '@/lib/marketplace/metrics';
 import {
   capturePayPalAuthorization,
   isPayPalConfigured,
@@ -159,6 +160,18 @@ export async function POST(request: Request, context: RouteContext) {
         throw new PaymentError(409, 'PAYMENT_STATE_CHANGED', 'Payment changed during provider capture.');
       }
       const eventCount = Number(payment.eventCount);
+      const completed = providerResult.status === 'COMPLETED';
+      const failed = providerResult.status === 'FAILED' || providerResult.status === 'DECLINED';
+      if ((completed || failed) && typeof payment.payeeId === 'string') {
+        await recordMarketplaceCaptureOutcome(
+          firestore,
+          transaction,
+          payment.payeeId,
+          paymentId,
+          completed ? 'success' : 'failure',
+          completed ? 'capture-success' : `capture-failure-${attempt}`,
+        );
+      }
       const timestamp = getServerTimestamp();
       if (providerResult.status === 'COMPLETED') {
         const payerIndex = contractContext.terms.parties.findIndex(
@@ -203,8 +216,6 @@ export async function POST(request: Request, context: RouteContext) {
           },
         );
       }
-      const completed = providerResult.status === 'COMPLETED';
-      const failed = providerResult.status === 'FAILED' || providerResult.status === 'DECLINED';
       const status = completed ? 'completed' : failed ? 'failed' : 'processing';
       transaction.update(paymentRef, {
         status,

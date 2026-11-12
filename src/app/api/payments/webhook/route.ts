@@ -6,6 +6,7 @@ import { getServerTimestamp } from '@/lib/firebase/firestore';
 import { loadPaymentLedgerContext } from '@/lib/payments/context';
 import { writePaymentEvent } from '@/lib/payments/events';
 import { PaymentError, paymentErrorResponse } from '@/lib/payments/errors';
+import { recordMarketplaceCaptureOutcome } from '@/lib/marketplace/metrics';
 import {
   PaymentProviderError,
   verifyPayPalWebhookSignature,
@@ -67,6 +68,15 @@ function hasExpectedAmount(resource: StoredData, payment: StoredData): boolean {
   }
   return amount.currency_code === payment.currency
     && parseMajorAmount(amount.value, amount.currency_code) === payment.amountMinor;
+}
+
+function captureAttemptNumber(payment: StoredData): number {
+  const attempts = asRecord(payment.attempts);
+  const capture = attempts?.capture;
+  if (typeof capture !== 'number' || !Number.isSafeInteger(capture) || capture < 1) {
+    throw new PaymentError(500, 'INVALID_PAYMENT', 'Payment capture attempt data is invalid.');
+  }
+  return capture;
 }
 
 function addPaymentEvent(
@@ -316,6 +326,16 @@ async function applyWebhookEvent(
       }, 'payment.failed', 'invalid_mandate_reservation');
       return { outcome: 'reconciliation_required', paymentId: paymentRef.id };
     }
+    if (typeof payment.payeeId === 'string') {
+      await recordMarketplaceCaptureOutcome(
+        firestore,
+        transaction,
+        payment.payeeId,
+        paymentRef.id,
+        'success',
+        'capture-success',
+      );
+    }
     const payerRef = firestore.collection('mandates').doc(String(payment.payerMandateId));
     const payeeRef = firestore.collection('mandates').doc(String(payment.payeeMandateId));
     const timestamp = getServerTimestamp();
@@ -383,6 +403,16 @@ async function applyWebhookEvent(
         failureCode: 'PAYMENT_STATE_CONFLICT_REQUIRES_RECONCILIATION',
       }, 'payment.webhook_processed', 'state_conflict');
       return { outcome: 'reconciliation_required', paymentId: paymentRef.id };
+    }
+    if (typeof payment.payeeId === 'string') {
+      await recordMarketplaceCaptureOutcome(
+        firestore,
+        transaction,
+        payment.payeeId,
+        paymentRef.id,
+        'failure',
+        `capture-failure-${captureAttemptNumber(payment)}`,
+      );
     }
     addPaymentEvent(firestore, transaction, paymentRef, event, payment, {
       status: 'failed',
