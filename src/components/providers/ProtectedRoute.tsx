@@ -13,6 +13,7 @@ const protectedRoutes = [
   '/negotiations',
   '/amendments',
   '/payments',
+  '/mandates',
 ];
 
 function isProtectedRoute(pathname: string): boolean {

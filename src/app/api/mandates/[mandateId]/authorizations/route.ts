@@ -4,10 +4,54 @@ import { apiError, apiSuccess } from '@/lib/api/responses';
 import { getServerTimestamp } from '@/lib/firebase/firestore';
 import { writeMandateAuditEvent } from '@/lib/mandates/audit';
 import { MandateError, mandateErrorResponse } from '@/lib/mandates/errors';
-import { assertExecutionAllowed, isAuthorizedAgent } from '@/lib/mandates/policy';
+import { assertExecutionAllowed, assertOwnerOrAgent, isAuthorizedAgent } from '@/lib/mandates/policy';
+import { timestampToIso } from '@/lib/mandates/format';
 import { mandateAuthorizationRequestSchema } from '@/models/mandate';
 
 type RouteContext = { params: Promise<{ mandateId: string }> };
+
+export async function GET(request: Request, context: RouteContext) {
+  const authentication = await authenticateRequest(request);
+  if (!authentication.authenticated) {
+    return authentication.response;
+  }
+
+  if (!adminFirestore) {
+    return apiError(503, 'SERVICE_UNAVAILABLE', 'Mandate storage is unavailable.');
+  }
+
+  const { mandateId } = await context.params;
+  try {
+    const mandateSnapshot = await adminFirestore.collection('mandates').doc(mandateId).get();
+    if (!mandateSnapshot.exists) {
+      return apiError(404, 'MANDATE_NOT_FOUND', 'Mandate was not found.');
+    }
+
+    const mandate = mandateSnapshot.data();
+    if (!mandate) {
+      throw new Error('Mandate document has no data.');
+    }
+    assertOwnerOrAgent(mandate, authentication.user.uid);
+
+    const authorizations = await adminFirestore
+      .collection('mandateAuthorizations')
+      .where('mandateId', '==', mandateId)
+      .orderBy('createdAt', 'desc')
+      .get();
+
+    return apiSuccess(authorizations.docs.map((snapshot) => {
+      const data = snapshot.data();
+      return {
+        ...data,
+        id: snapshot.id,
+        createdAt: timestampToIso(data.createdAt),
+        updatedAt: timestampToIso(data.updatedAt),
+      };
+    }));
+  } catch (error: unknown) {
+    return mandateErrorResponse(error);
+  }
+}
 
 export async function POST(request: Request, context: RouteContext) {
   const authentication = await authenticateRequest(request);

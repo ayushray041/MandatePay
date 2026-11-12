@@ -24,16 +24,18 @@ src/
 
 ### Data Flow
 1. **User signs up or signs in** via Firebase Auth email/password (client-side, persisted locally). A verified ID token is sent to protected API routes; route guards provide UX redirects while APIs independently verify the token.
-2. **Contract upload** → stored in Firestore (`contracts` collection) and optionally in Cloud Storage for PDF blobs.
-3. **Contract Intelligence Service** reads the raw contract, calls Gemini, returns a structured `ContractTerms` object validated by Zod.
-4. **Negotiation Service** creates two isolated agent contexts, each provided with the private mandate (generated server‑side). Agents exchange proposals via a persisted `negotiationRounds` sub‑collection. After ≤5 rounds the final proposal is stored as `amendments`.
-5. **Payment Service** creates a PayPal order (authorization) using the approved amendment amount (in integer cents). The order ID is saved in the amendment document. Capture is triggered by a backend webhook after delivery confirmation.
+2. **Mandate management** → owners create draft mandates naming an authorized agent, policy, budget, and execution window. Server APIs enforce lifecycle, ownership, approval, and budget constraints; Firestore stores the mandate and audit events.
+3. **Contract upload** → stored in Firestore (`contracts` collection) and optionally in Cloud Storage for PDF blobs.
+4. **Contract Intelligence Service** reads the raw contract, calls Gemini, returns a structured `ContractTerms` object validated by Zod.
+5. **Negotiation Service** creates two isolated agent contexts, each provided with the private mandate (generated server‑side). Agents exchange proposals via a persisted `negotiationRounds` sub‑collection. After ≤5 rounds the final proposal is stored as `amendments`.
+6. **Payment Service** creates a PayPal order (authorization) using the approved amendment amount (in integer cents). The order ID is saved in the amendment document. Capture is triggered by a backend webhook after delivery confirmation.
 
 ### Security Considerations
 - **Secrets** (Gemini API key, PayPal client secret, Firebase admin credentials) live only in Vercel environment variables and are accessed via server‑only code (`/src/app/api/...` routes). No secret is exposed to the browser.
 - **Private mandates** are generated on the server, stored encrypted (e.g., using `crypto.subtle` with a KMS‑managed key) and never sent to the opposite agent.
 - **Input validation** – every incoming JSON payload is validated with Zod before any business logic runs.
 - **Identity and authorization** – API identity is derived only from a verified Firebase ID token. Firestore Admin SDK calls bypass Security Rules, so API handlers must enforce ownership themselves.
+- **Mandate enforcement** – operation requests re-check active status, dates, allowed operation, per-operation conditions, approval requirements, and remaining budget inside Firestore transactions. Increasing a spending limit requires an authorized-agent request and a separate owner decision.
 - **Payment integrity** – amounts are stored as integer cents; the front‑end never trusts user‑provided amounts – the server recomputes the total from the amendment data.
 - **Firestore security rules** enforce that only the authenticated user can read/write their own contracts and that only admin service accounts may write payment status fields.
 

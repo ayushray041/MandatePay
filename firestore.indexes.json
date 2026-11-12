@@ -9,6 +9,14 @@
       ]
     },
     {
+      "collectionGroup": "mandateAuthorizations",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "mandateId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "mandates",
       "queryScope": "COLLECTION",
       "fields": [

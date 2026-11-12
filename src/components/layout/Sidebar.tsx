@@ -8,6 +8,7 @@ import {
   FileCheck2,
   FileText,
   LayoutDashboard,
+  ShieldCheck,
   Wallet,
 } from 'lucide-react';
 
@@ -18,6 +19,7 @@ const links = [
   { href: '/negotiations', label: 'Negotiations', icon: ArrowLeftRight },
   { href: '/amendments', label: 'Amendments', icon: FileCheck2 },
   { href: '/payments', label: 'Payments', icon: Wallet },
+  { href: '/mandates', label: 'Mandates', icon: ShieldCheck },
 ];
 
 export const Sidebar: React.FC = () => {

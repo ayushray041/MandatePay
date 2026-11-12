@@ -18,8 +18,32 @@ sends the current Firebase ID token in an Authorization bearer header when calli
 `UserProfile` contains `uid`, `email`, `displayName`, `role`, `createdAt`, and `updatedAt`.
 
 The authentication, profile, and health endpoints above are implemented in Phase 1. The
-contract, negotiation, amendment, payment, and webhook entries below describe planned contracts;
-their Route Handlers are not implemented yet.
+mandate endpoints below are implemented in Phase 2. The remaining contract, negotiation,
+amendment, payment, and webhook entries describe planned contracts; their Route Handlers are not
+implemented yet.
+
+### Mandates
+All mandate routes require `Authorization: Bearer <Firebase ID token>`. The server derives owner
+and agent identity from the verified token. Successful responses use `{ "data": ... }`.
+
+| Method | Path | Request | Notes |
+|--------|------|---------|-------|
+| GET | `/api/mandates` | – | Lists mandates owned by or assigned to the verified user. |
+| POST | `/api/mandates` | Mandate definition | Creates a draft owned by the verified user. The authorized agent must have a profile. |
+| GET | `/api/mandates/:mandateId` | – | Returns details only to its owner or authorized agent. |
+| PATCH | `/api/mandates/:mandateId` | Partial mandate definition | Owner-only draft editing. Spending-limit increases are rejected; reductions cannot undercut committed spend. |
+| POST | `/api/mandates/:mandateId/lifecycle` | `{ action: "activate" \| "pause" \| "resume" \| "revoke" }` | Owner-only lifecycle transition. Revocation is irreversible. |
+| POST | `/api/mandates/:mandateId/limit-requests` | `{ requestedLimitMinor, reason }` | Assigned-agent request for a higher limit. |
+| POST | `/api/mandates/:mandateId/limit-requests/decision` | `{ decision: "approve" \| "reject" }` | Owner approves or rejects the pending increase. |
+| GET | `/api/mandates/:mandateId/authorizations` | – | Lists that mandate’s operation authorization records to owner and agent. |
+| POST | `/api/mandates/:mandateId/authorizations` | `{ operation, amountMinor, description }` | Assigned agent requests an operation. The API enforces status, time window, allowed operations, budget, approval policy, and execution conditions in a Firestore transaction. |
+| PATCH | `/api/mandates/:mandateId/authorizations/:authorizationId` | `{ decision: "approve" \| "reject" }` | Owner decides a pending operation. Approved amounts are committed against the budget transactionally. |
+
+Amounts are represented as integer currency minor units. An `approved` mandate authorization records
+permission and commits budget only; it does not claim that a contract, payment, or external operation
+has executed. Every mandate mutation and operation decision creates an immutable server-side audit
+event. Expired status is derived from the expiry timestamp on reads and persisted with an audit event
+when the owner attempts a lifecycle transition.
 
 ### Contracts
 | Method | Path | Request | Response | Notes |

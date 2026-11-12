@@ -120,9 +120,59 @@ export const mandateAuthorizationRequestSchema = z
   })
   .strict();
 
+export const mandateRecordSchema = z
+  .object({
+    id: z.string().min(1),
+    ownerId: z.string().min(1),
+    authorizedAgentId: z.string().min(1),
+    title: z.string(),
+    description: z.string(),
+    spendingLimitMinor: minorUnitAmountSchema,
+    spentAmountMinor: z.number().int().nonnegative(),
+    currency: z.string(),
+    startsAt: z.string().nullable(),
+    expiresAt: z.string().nullable(),
+    allowedOperations: z.array(mandateOperationSchema),
+    approvalRequirements: mandateApprovalRequirementsSchema,
+    executionConditions: mandateExecutionConditionsSchema,
+    status: mandateStatusSchema,
+    pendingLimitRequest: z
+      .object({
+        requestedLimitMinor: minorUnitAmountSchema,
+        requestedBy: z.string(),
+        reason: z.string(),
+        previousLimitMinor: minorUnitAmountSchema,
+      })
+      .passthrough()
+      .nullable(),
+    createdAt: z.string().nullable(),
+    updatedAt: z.string().nullable(),
+  })
+  .passthrough();
+
+export const mandateAuthorizationRecordSchema = z
+  .object({
+    id: z.string().min(1),
+    mandateId: z.string().min(1),
+    ownerId: z.string().min(1),
+    authorizedAgentId: z.string().min(1),
+    operation: mandateOperationSchema,
+    amountMinor: minorUnitAmountSchema,
+    currency: z.string(),
+    description: z.string(),
+    status: z.enum(['pending_approval', 'approved', 'rejected']),
+    createdAt: z.string().nullable(),
+    updatedAt: z.string().nullable(),
+  })
+  .passthrough();
+
 export type MandateStatus = z.infer<typeof mandateStatusSchema>;
 export type MandateOperation = z.infer<typeof mandateOperationSchema>;
 export type MandateCreateInput = z.infer<typeof mandateCreateSchema>;
+export type MandateRecord = z.infer<typeof mandateRecordSchema>;
+export type MandateAuthorizationRecord = z.infer<
+  typeof mandateAuthorizationRecordSchema
+>;
 export type MandateExecutionConditions = z.infer<
   typeof mandateExecutionConditionsSchema
 >;
