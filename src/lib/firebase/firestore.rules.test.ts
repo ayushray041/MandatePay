@@ -79,6 +79,18 @@ describe.skipIf(!emulatorAddress)('Firestore security rules', () => {
         sequence: 1,
         type: 'contract.generated',
       });
+      await setDoc(doc(db, 'payments/payment-1'), {
+        participantIds: ['alice', 'bob'],
+        status: 'pending',
+      });
+      await setDoc(doc(db, 'payments/payment-1/events/event-1'), {
+        sequence: 1,
+        type: 'payment.created',
+      });
+      await setDoc(doc(db, 'paypalWebhookEvents/event-1'), {
+        providerEventId: 'event-1',
+        outcome: 'processed',
+      });
     });
 
     const aliceDb = environment.authenticatedContext('alice').firestore();
@@ -92,6 +104,9 @@ describe.skipIf(!emulatorAddress)('Firestore security rules', () => {
     await assertFails(getDoc(doc(aliceDb, 'contracts/contract-1/events/event-1')));
     await assertFails(setDoc(doc(aliceDb, 'contracts/contract-2'), { participantIds: ['alice'] }));
     await assertFails(getDoc(doc(aliceDb, 'payments/payment-1')));
+    await assertFails(getDoc(doc(aliceDb, 'payments/payment-1/events/event-1')));
+    await assertFails(getDoc(doc(aliceDb, 'paypalWebhookEvents/event-1')));
+    await assertFails(setDoc(doc(aliceDb, 'paypalWebhookEvents/client-event'), { outcome: 'processed' }));
   });
 
   it('denies direct client access to agent and negotiation records and history', async () => {

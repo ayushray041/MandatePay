@@ -55,6 +55,18 @@ service cloud.firestore {
       }
     }
 
+    match /payments/{paymentId} {
+      allow read, write: if false;
+
+      match /events/{eventId} {
+        allow read, write: if false;
+      }
+    }
+
+    match /paypalWebhookEvents/{eventId} {
+      allow read, write: if false;
+    }
+
     match /{document=**} {
       allow read, write: if false;
     }

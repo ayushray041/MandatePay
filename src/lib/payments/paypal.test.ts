@@ -155,6 +155,18 @@ describe('PayPal sandbox provider', () => {
     await expect(createPayPalOrder(paymentInput)).rejects.toThrow('unsafe approval link');
   });
 
+  it('keeps provider request IDs stable for retries but isolates a new payment cycle', async () => {
+    const first = { ...paymentInput, paymentCycle: 'cycle-one' };
+    await createPayPalOrder(first);
+    await createPayPalOrder(first);
+    const newCycle = { ...paymentInput, paymentCycle: 'cycle-two' };
+    await createPayPalOrder(newCycle);
+
+    const requestIds = mocks.createOrder.mock.calls.map(([input]) => input.paypalRequestId);
+    expect(requestIds[0]).toBe(requestIds[1]);
+    expect(requestIds[2]).not.toBe(requestIds[0]);
+  });
+
   it('validates provider authorization and capture amounts and returns provider state', async () => {
     await expect(authorizePayPalOrder({
       ...paymentInput,
