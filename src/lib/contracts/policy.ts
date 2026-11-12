@@ -194,7 +194,9 @@ export function contractExpiryStatus(
   now = new Date(),
 ): string {
   const expiry = timestampToIso(expiresAt);
-  return status === 'active' && expiry !== null && Date.parse(expiry) <= now.getTime()
+  return (status === 'active' || status === 'pending_review')
+    && expiry !== null
+    && Date.parse(expiry) <= now.getTime()
     ? 'expired'
     : String(status);
 }

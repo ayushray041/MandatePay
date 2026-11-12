@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Check, Clock3, FileText, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, Check, Clock3, FileText, Printer, Sparkles, X } from 'lucide-react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { Button } from '@/components/ui/Button';
 import {
@@ -227,10 +227,12 @@ export function ContractDetail({ contractId }: { contractId: string }) {
   const canProposeAmendment = contract.status === 'active'
     && !contract.activeAmendmentId
     && Boolean(terms);
+  const daysUntilExpiry = contract.renewalReminderDaysRemaining ?? null;
+  const showRenewalReminder = daysUntilExpiry !== null;
 
   return (
-    <section className="mp-page mx-auto w-full max-w-6xl space-y-8">
-      <header className="border-b border-mp-warm-grey pb-6">
+    <section className="mp-page mx-auto w-full max-w-6xl space-y-8 print:max-w-none print:p-0">
+      <header className="border-b border-mp-warm-grey pb-6 print:hidden">
         <Link href="/contracts" className="inline-flex items-center gap-2 text-sm font-semibold text-mp-medium-grey">
           <ArrowLeft size={16} aria-hidden="true" /> Back to contracts
         </Link>
@@ -246,20 +248,41 @@ export function ContractDetail({ contractId }: { contractId: string }) {
           <Clock3 size={15} aria-hidden="true" />
           Expires {new Date(contract.expiresAt).toLocaleString()}
         </p>
+        {terms && (
+          <div className="mt-4">
+            <Button type="button" variant="outline" onClick={() => window.print()}>
+              <Printer size={16} aria-hidden="true" /> Export PDF
+            </Button>
+            <p className="mt-1 text-xs text-mp-medium-grey">
+              Choose “Save as PDF” in your browser’s print dialog.
+            </p>
+          </div>
+        )}
       </header>
 
       {(error || notice) && (
-        <p className={`border-l-2 px-4 py-3 text-sm ${error ? 'border-mp-orange bg-mp-surface' : 'border-emerald-700 bg-emerald-50'}`} role={error ? 'alert' : 'status'}>
+        <p className={`border-l-2 px-4 py-3 text-sm print:hidden ${error ? 'border-mp-orange bg-mp-surface' : 'border-emerald-700 bg-emerald-50'}`} role={error ? 'alert' : 'status'}>
           {error ?? notice}
         </p>
       )}
-      <p className="border border-mp-warm-grey bg-mp-surface p-4 text-sm text-mp-medium-grey">
+      {showRenewalReminder && (
+        <aside className="border-l-2 border-mp-orange bg-mp-surface p-4 text-sm print:hidden" role="status">
+          <p className="font-semibold">Renewal reminder: this contract expires in {daysUntilExpiry} day{daysUntilExpiry === 1 ? '' : 's'}.</p>
+          <p className="mt-1 text-mp-medium-grey">
+            {contract.activeAmendmentId
+              ? 'A proposed amendment is already awaiting review.'
+              : 'Propose an amendment below to request renewal. Any extension remains subject to both active mandates and required party approvals.'}
+          </p>
+        </aside>
+      )}
+      <p className="border border-mp-warm-grey bg-mp-surface p-4 text-sm text-mp-medium-grey print:hidden">
         This is an administrative record of negotiated terms, not legal advice or a digitally signed
-        agreement. MandatePay does not execute payments or monitor service delivery.
+        agreement. No e-signature provider is configured; no signature is represented. MandatePay
+        does not execute payments or monitor service delivery.
       </p>
 
       {terms && (
-        <section className="space-y-4 border border-mp-warm-grey bg-mp-surface p-5 sm:p-7" aria-labelledby="contract-analysis-heading">
+        <section className="space-y-4 border border-mp-warm-grey bg-mp-surface p-5 sm:p-7 print:hidden" aria-labelledby="contract-analysis-heading">
           <div className="flex items-center gap-2">
             <Sparkles size={18} className="text-mp-orange" aria-hidden="true" />
             <h2 id="contract-analysis-heading" className="text-lg font-semibold">AI clause review</h2>
@@ -302,12 +325,20 @@ export function ContractDetail({ contractId }: { contractId: string }) {
       )}
 
       {terms ? (
-        <article className="space-y-8 border border-mp-warm-grey bg-white p-6 shadow-sm sm:p-10">
+        <article className="space-y-8 border border-mp-warm-grey bg-white p-6 shadow-sm sm:p-10 print:mx-0 print:border-0 print:p-0 print:shadow-none">
           <header className="border-b border-mp-warm-grey pb-5">
             <p className="text-xs font-semibold uppercase tracking-widest text-mp-medium-grey">Service agreement record</p>
             <h2 className="mt-2 text-2xl font-bold">{terms.service.title}</h2>
             <p className="mt-2 text-sm text-mp-medium-grey">
               Version {version.version} · Generated {version.createdAt ? new Date(version.createdAt).toLocaleString() : 'time unavailable'}
+            </p>
+            <p className="mt-2 break-all font-mono text-xs text-mp-medium-grey">
+              SHA-256: {version.integrityHash ?? 'Unavailable for this legacy version'}
+            </p>
+            <p className="mt-1 text-xs text-mp-medium-grey">
+              {version.integrityStatus === 'verified'
+                ? `Integrity verified · JSON snapshot ${version.documentMetadata?.fileName ?? 'metadata unavailable'}`
+                : 'Legacy version without a stored integrity hash'}
             </p>
           </header>
 
@@ -374,6 +405,11 @@ export function ContractDetail({ contractId }: { contractId: string }) {
               <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{terms.terminationConditions}</p>
             </div>
           </section>
+          <footer className="border-t border-mp-warm-grey pt-4 text-xs leading-5 text-mp-medium-grey">
+            Administrative record of negotiated terms only. Not legal advice, payment authorization,
+            or a digitally signed agreement. No e-signature provider is configured. The SHA-256
+            hash covers the canonical version record, not the exported PDF bytes.
+          </footer>
         </article>
       ) : (
         <p className="border-l-2 border-mp-orange px-4 py-3 text-sm" role="alert">
@@ -382,7 +418,7 @@ export function ContractDetail({ contractId }: { contractId: string }) {
       )}
 
       {contract.status === 'pending_review' && (
-        <section className="border-l-2 border-mp-orange bg-mp-surface p-5">
+        <section className="border-l-2 border-mp-orange bg-mp-surface p-5 print:hidden">
           <div className="flex items-center gap-2">
             <FileText size={18} aria-hidden="true" />
             <h2 className="text-lg font-semibold">Review and approval</h2>
@@ -551,7 +587,7 @@ export function ContractDetail({ contractId }: { contractId: string }) {
         </section>
       )}
 
-      <section className="grid gap-8 border-t border-mp-warm-grey pt-6 lg:grid-cols-2">
+      <section className="grid gap-8 border-t border-mp-warm-grey pt-6 lg:grid-cols-2 print:hidden">
         <div>
           <h2 className="text-lg font-semibold">Immutable version history</h2>
           <ol className="mt-4 space-y-3">
@@ -562,6 +598,11 @@ export function ContractDetail({ contractId }: { contractId: string }) {
                 <p className="mt-1 text-sm text-mp-medium-grey">
                   {formatMinorAmount(item.terms.amountMinor, item.terms.currency)}
                   {' · '}{item.createdAt ? new Date(item.createdAt).toLocaleString() : 'Time unavailable'}
+                </p>
+                <p className="mt-1 break-all font-mono text-xs text-mp-medium-grey">
+                  {item.integrityStatus === 'verified'
+                    ? `SHA-256 ${item.integrityHash}`
+                    : 'Legacy version · no stored integrity hash'}
                 </p>
                 {item.amendmentId && <p className="mt-1 font-mono text-xs text-mp-medium-grey">Amendment {item.amendmentId}</p>}
               </li>

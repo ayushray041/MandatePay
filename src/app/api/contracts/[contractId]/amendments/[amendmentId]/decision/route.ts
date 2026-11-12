@@ -5,8 +5,13 @@ import { ContractError, contractErrorResponse } from '@/lib/contracts/errors';
 import { writeContractEvent } from '@/lib/contracts/events';
 import { formatContractAmendment } from '@/lib/contracts/format';
 import {
+  assertContractVersionIntegrity,
+  contractVersionMetadata,
+} from '@/lib/contracts/integrity';
+import {
   assertContractTermsAuthorized,
   assertRequiredApprover,
+  contractExpiryStatus,
   contractReservationUsageWindowKeys,
 } from '@/lib/contracts/policy';
 import { getServerTimestamp } from '@/lib/firebase/firestore';
@@ -65,7 +70,7 @@ export async function POST(request: Request, context: RouteContext) {
       }
       assertRequiredApprover(contract, uid);
       if (
-        contract.status !== 'active'
+        contractExpiryStatus(contract.status, contract.expiresAt, now) !== 'active'
         || contract.activeAmendmentId !== amendmentId
         || amendment.status !== 'pending_review'
         || amendment.baseVersion !== contract.currentVersion
@@ -92,6 +97,19 @@ export async function POST(request: Request, context: RouteContext) {
         throw new ContractError(500, 'INVALID_CONTRACT', 'Current contract version was not found.');
       }
       const currentVersion = currentVersionSnapshot.data();
+      assertContractVersionIntegrity({
+        contractId: String(currentVersion?.contractId ?? ''),
+        version: Number(currentVersion?.version),
+        previousVersionId: typeof currentVersion?.previousVersionId === 'string'
+          ? currentVersion.previousVersionId
+          : null,
+        negotiationId: String(currentVersion?.negotiationId ?? ''),
+        amendmentId: typeof currentVersion?.amendmentId === 'string'
+          ? currentVersion.amendmentId
+          : null,
+        createdBy: String(currentVersion?.createdBy ?? ''),
+        terms: currentVersion?.terms,
+      }, currentVersion?.integrityHash, currentVersionId);
       const currentTermsResult = contractTermsSchema.safeParse(currentVersion?.terms);
       const proposedTermsResult = contractTermsSchema.safeParse(amendment.proposedTerms);
       if (!currentTermsResult.success || !proposedTermsResult.success) {
@@ -253,15 +271,19 @@ export async function POST(request: Request, context: RouteContext) {
         velocityUsage: secondVelocityUsage.velocityUsage,
         updatedAt: timestamp,
       });
-      transaction.create(nextVersionRef, {
+      const versionContent = {
         contractId,
         version: nextVersion,
         previousVersionId: currentVersionId,
         negotiationId: contract.negotiationId,
         amendmentId,
         createdBy: uid,
-        createdAt: timestamp,
         terms: proposedTerms,
+      };
+      transaction.create(nextVersionRef, {
+        ...versionContent,
+        createdAt: timestamp,
+        ...contractVersionMetadata(versionContent),
       });
       transaction.update(amendmentRef, {
         status: 'accepted',

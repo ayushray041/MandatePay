@@ -4,9 +4,11 @@ import { apiError, apiSuccess } from '@/lib/api/responses';
 import { ContractError, contractErrorResponse } from '@/lib/contracts/errors';
 import { writeContractEvent } from '@/lib/contracts/events';
 import { formatContract } from '@/lib/contracts/format';
+import { assertContractVersionIntegrity } from '@/lib/contracts/integrity';
 import {
   assertContractTermsAuthorized,
   assertRequiredApprover,
+  contractExpiryStatus,
   contractReservationUsageWindowKeys,
 } from '@/lib/contracts/policy';
 import { getServerTimestamp } from '@/lib/firebase/firestore';
@@ -68,6 +70,9 @@ export async function POST(request: Request, context: RouteContext) {
         throw new Error('Contract document has no data.');
       }
       assertRequiredApprover(contract, uid);
+      if (contractExpiryStatus(contract.status, contract.expiresAt, now) === 'expired') {
+        throw new ContractError(409, 'CONTRACT_EXPIRED', 'The contract has expired and cannot be reviewed.');
+      }
       if (contract.status !== 'pending_review') {
         throw new ContractError(409, 'CONTRACT_NOT_REVIEWABLE', 'Contract is not awaiting review.');
       }
@@ -86,6 +91,17 @@ export async function POST(request: Request, context: RouteContext) {
         throw new ContractError(500, 'INVALID_CONTRACT', 'Current contract version was not found.');
       }
       const version = versionSnapshot.data();
+      assertContractVersionIntegrity({
+        contractId: String(version?.contractId ?? ''),
+        version: Number(version?.version),
+        previousVersionId: typeof version?.previousVersionId === 'string'
+          ? version.previousVersionId
+          : null,
+        negotiationId: String(version?.negotiationId ?? ''),
+        amendmentId: typeof version?.amendmentId === 'string' ? version.amendmentId : null,
+        createdBy: String(version?.createdBy ?? ''),
+        terms: version?.terms,
+      }, version?.integrityHash, versionId);
       const termsResult = contractTermsSchema.safeParse(version?.terms);
       if (!termsResult.success) {
         throw new ContractError(500, 'INVALID_CONTRACT', 'Current contract terms are invalid.');

@@ -158,3 +158,28 @@
 - Validated structured results and evidence references are persisted to private `aiDecisionHistory`; prompts/raw documents are not. No automatic history retention/TTL cleanup or provider account-level global spend cap is configured.
 - The risk forecast is a 30-day daily-average projection and vendor estimates use only caller-visible history. Neither establishes future spend or market price; production-quality evaluation remains outstanding.
 - The Gemini adapter is not a legal review or source of authority. Contract analysis is an advisory review aid and does not determine legal enforceability.
+
+## Phase 6: Contract and agreement lifecycle
+
+### Completed
+- Reused the existing accepted-negotiation contract generation, participant listing/detail, party approval/rejection, immutable version history, amendment comparison/review, mandate revalidation, and transactional reservation behavior.
+- Added canonical SHA-256 hashes and JSON document metadata to newly generated contract versions. Authorized detail reads verify version hashes and reject mismatches; pre-existing versions without hashes remain available but are clearly identified as unverified legacy records.
+- Added a bounded, `CRON_SECRET`-protected expiry worker for active and pending-review contracts, plus transactionally materialized expiry events on participant detail access. Expiry releases reservations atomically when there is no payment record; payment-backed reservations remain with the payment lifecycle. Approval and amendment routes reject already-expired contracts even if the worker has not run.
+- Added an on-page 30-day renewal reminder. Renewal requests use the existing amendment workflow and remain subject to both active mandates and required party approval.
+- Added browser print-to-PDF export from the authorized contract detail page. The exported record includes its version integrity hash. No e-signature provider is configured; the UI explicitly makes no signature claim.
+- Preserved prior versions; approved amendments append a new version and never overwrite historical terms.
+
+### Verification
+- `npx tsc --noEmit`: passed.
+- `npm run lint`: passed.
+- Focused contract tests: passed — 3 files, 14 tests.
+- `npm test`: passed — 41 files passed, 1 skipped; 191 tests passed, 4 skipped. The Firestore rules test was skipped because the emulator is not configured.
+- `npm run build`: passed; `/api/contracts/expire` is included in the production route build.
+- Firestore index JSON validation and `git diff --check`: passed.
+
+### Scope and remaining work
+- Proactive expiry requires a trusted deployment scheduler to call `POST /api/contracts/expire` with server-only `CRON_SECRET`; deployment scheduling is not configured in this repository.
+- Renewal reminders are displayed in the contract detail page only. No outbound notification provider or reminder-delivery worker is configured.
+- PDF creation uses the browser print dialog (“Save as PDF”); there is no server-side PDF renderer or stored PDF asset.
+- Existing pre-change contract versions have no persisted integrity hash and cannot be retroactively verified.
+- No e-signature provider is configured; approval records are not digital signatures.

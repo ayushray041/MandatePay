@@ -4,6 +4,7 @@ import { apiError, apiSuccess } from '@/lib/api/responses';
 import { ContractError, contractErrorResponse } from '@/lib/contracts/errors';
 import { writeContractEvent } from '@/lib/contracts/events';
 import { formatContract } from '@/lib/contracts/format';
+import { contractVersionMetadata } from '@/lib/contracts/integrity';
 import {
   assertContractTermsAuthorized,
   contractReservationUsageWindowKeys,
@@ -253,15 +254,19 @@ export async function POST(request: Request) {
         throw new ContractError(404, 'NEGOTIATION_NOT_FOUND', 'Negotiation was not found.');
       }
       const timestamp = getServerTimestamp();
-      transaction.create(versionRef, {
+      const versionContent = {
         contractId: negotiationId,
         version: 1,
         previousVersionId: null,
         negotiationId,
         amendmentId: null,
         createdBy: authentication.user.uid,
-        createdAt: timestamp,
         terms,
+      };
+      transaction.create(versionRef, {
+        ...versionContent,
+        createdAt: timestamp,
+        ...contractVersionMetadata(versionContent),
       });
       transaction.create(contractRef, {
         negotiationId,

@@ -123,6 +123,13 @@ export const contractVersionSchema = z.object({
   createdBy: z.string().min(1),
   createdAt: z.string().nullable(),
   terms: contractTermsSchema,
+  integrityHash: z.string().regex(/^[a-f0-9]{64}$/).nullable().optional(),
+  integrityStatus: z.enum(['verified', 'legacy_unhashed']).optional(),
+  documentMetadata: z.object({
+    format: z.literal('mandatepay-contract-json-v1'),
+    contentType: z.literal('application/json'),
+    fileName: z.string().min(1).max(240),
+  }).strict().optional(),
 }).strict();
 
 export const contractAmendmentSchema = z.object({
@@ -146,6 +153,7 @@ export const contractRecordSchema = z.object({
   requiredApproverIds: z.array(z.string().min(1)),
   mandateIds: z.tuple([z.string().min(1), z.string().min(1)]),
   status: contractStatusSchema,
+  renewalReminderDaysRemaining: z.number().int().min(0).max(30).nullable().optional(),
   currentVersion: z.number().int().positive(),
   currentVersionId: z.string().min(1),
   activeAmendmentId: z.string().nullable(),

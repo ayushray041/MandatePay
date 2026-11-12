@@ -237,6 +237,11 @@ describe('contract and amendment APIs', () => {
     expect(payload.data?.requiredApproverIds).toEqual(['owner-a', 'agent-a', 'owner-b', 'agent-b']);
     const generatedTerms = mocks.documents.get('contracts/neg-1/versions/v1')?.terms as Record<string, unknown>;
     expect(generatedTerms).toMatchObject({ amountMinor: 10_000, currency: 'USD' });
+    expect(mocks.documents.get('contracts/neg-1/versions/v1')?.integrityHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(mocks.documents.get('contracts/neg-1/versions/v1')?.documentMetadata).toMatchObject({
+      format: 'mandatepay-contract-json-v1',
+      contentType: 'application/json',
+    });
     expect(generatedTerms.parties).toEqual(expect.arrayContaining([
       expect.objectContaining({ displayName: 'Owner A', agentDisplayName: 'Display agent-a' }),
     ]));
@@ -294,6 +299,33 @@ describe('contract and amendment APIs', () => {
     expect(mocks.documents.get('contracts/neg-1/versions/v1')?.terms).toMatchObject(terms);
   });
 
+  it('rejects approval of an expired pending contract', async () => {
+    seedContract();
+    mocks.documents.set('contracts/neg-1', {
+      ...mocks.documents.get('contracts/neg-1'),
+      expiresAt: new Date(now.getTime() - 1_000),
+    });
+
+    const response = await decideContract(request({ decision: 'approve' }), contractContext);
+
+    expect(response.status).toBe(409);
+    expect(mocks.documents.get('contracts/neg-1')?.status).toBe('pending_review');
+    expect(mocks.documents.get('contracts/neg-1')?.approvals).toEqual([]);
+  });
+
+  it('rejects review when the current immutable version hash does not match', async () => {
+    seedContract();
+    mocks.documents.set('contracts/neg-1/versions/v1', {
+      ...mocks.documents.get('contracts/neg-1/versions/v1'),
+      integrityHash: 'a'.repeat(64),
+    });
+
+    const response = await decideContract(request({ decision: 'approve' }), contractContext);
+
+    expect(response.status).toBe(409);
+    expect(mocks.documents.get('contracts/neg-1')?.approvals).toEqual([]);
+  });
+
   it('requires fresh mandate capacity before accepting an amendment', async () => {
     seedContract('active');
     mocks.documents.set('mandates/mandate-b', {
@@ -340,6 +372,7 @@ describe('contract and amendment APIs', () => {
       amountMinor: 12_000,
       service: { title: 'Expanded website' },
     });
+    expect(mocks.documents.get('contracts/neg-1/versions/v2')?.integrityHash).toMatch(/^[a-f0-9]{64}$/);
     expect(mocks.documents.get('mandates/mandate-a')?.reservedAmountMinor).toBe(12_000);
     expect(mocks.documents.get('mandates/mandate-b')?.reservedAmountMinor).toBe(12_000);
     expect(mocks.documents.get(`contracts/neg-1/amendments/${amendmentId}`)?.status).toBe('accepted');

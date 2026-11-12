@@ -9,6 +9,7 @@ import { attachHumanReviewMetadata } from '@/lib/ai/review';
 import { consumeAiRequestQuota } from '@/lib/ai/usage';
 import { ContractError } from '@/lib/contracts/errors';
 import { assertContractParty } from '@/lib/contracts/policy';
+import { assertContractVersionIntegrity } from '@/lib/contracts/integrity';
 import { formatContract, formatContractVersion } from '@/lib/contracts/format';
 import { contractRecordSchema, contractVersionSchema } from '@/models/contract';
 
@@ -42,6 +43,15 @@ export async function POST(request: Request, context: RouteContext) {
     if (version.contractId !== contractId || version.version !== contract.currentVersion) {
       throw new AiRequestError(409, 'CURRENT_VERSION_MISMATCH', 'The current contract version could not be verified.');
     }
+    assertContractVersionIntegrity({
+      contractId: version.contractId,
+      version: version.version,
+      previousVersionId: version.previousVersionId,
+      negotiationId: version.negotiationId,
+      amendmentId: version.amendmentId,
+      createdBy: version.createdBy,
+      terms: version.terms,
+    }, version.integrityHash, version.id);
 
     const userId = authentication.user.uid;
     await consumeAiRequestQuota(userId);

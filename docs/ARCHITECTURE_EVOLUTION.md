@@ -36,7 +36,7 @@ The current dependency flow is:
 | Mandates and authorizations | `src/lib/mandates`, `/api/mandates` | Integer minor units, owner/agent boundaries, lifecycle/expiry, approval rules, committed spend, reservations, and immutable audit events. |
 | Agents and agent IAM | `src/lib/agents`, `/api/agents`, `/api/agent/v1` | Verified account owner, immutable random agent ID registry, HMAC-hashed scoped API keys, expiry/revocation/session state, shared transactional minute/day quotas, runtime status/version and append-only activity; external mandate APIs additionally check mandate assignment. |
 | Negotiations | `src/lib/negotiations`, `/api/negotiations` | Participant-only state machine; CAS against current offer, versioned snapshots, independent comparison batches, owner approval gates atomic dual-mandate reservation, bounded expiry and dispute handling. |
-| Contracts and amendments | `src/lib/contracts`, `/api/contracts`, `/api/amendments` | Contract ID is the accepted negotiation ID; immutable version snapshots; required party approvals; transactional reservation deltas. |
+| Contracts and amendments | `src/lib/contracts`, `/api/contracts`, `/api/amendments` | Contract ID is the accepted negotiation ID; immutable version snapshots with canonical SHA-256 integrity metadata; required party approvals; transactional reservation deltas; scheduled/access-time expiry. |
 | Payments | `src/lib/payments`, `/api/payments` | One payment record per contract and cycle; amount from the approved version; PayPal sandbox operations; webhook receipts and ledger transitions are transactional. |
 | AI decision and risk intelligence | `src/lib/ai`, `/api/ai`, negotiation intelligence and contract analysis routes | Provider interface/factory, strict schemas, rule-based risk signals, atomic request quotas, private caller-scoped recommendation history, and no authority over financial workflows. |
 
@@ -75,7 +75,14 @@ defense.
   access-time expiry remains in place. A deployment scheduler and `CRON_SECRET` are still required.
 - Contract generation uses the negotiation ID as a unique document key. Contract review and
   amendment decisions update approval state, immutable versions, audit events, and reservation
-  deltas transactionally.
+  deltas transactionally. New versions carry a canonical SHA-256 integrity hash and document
+  metadata; participant detail reads verify stored hashes and identify pre-hash legacy versions.
+- Contract expiry is enforced in approval/amendment transitions, materialized on participant detail
+  access, and available through the bounded `POST /api/contracts/expire` worker. The detail page
+  displays a 30-day renewal reminder and can invoke browser print-to-PDF. Expiry releases reserved
+  budget transactionally when there is no payment record; payment-backed reservations remain with
+  the payment lifecycle. A trusted scheduler, `CRON_SECRET`, outbound notification provider, and
+  e-signature provider are not configured here.
 - Payment initiation uses the existing reservation rather than reserving again. Capture and
   provider webhook reconciliation update payment state and mandate ledgers transactionally.
 - Provider calls are outside Firestore transactions and use operation-specific idempotency IDs.

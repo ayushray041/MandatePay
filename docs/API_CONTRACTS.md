@@ -270,10 +270,11 @@ reads and transitions enforce participant/approver access in the API.
 |--------|------|---------|------------------|
 | GET | `/api/contracts` | – | Lists contracts for the caller, including lifecycle status. |
 | POST | `/api/contracts` | `{ negotiationId }` | Generates one reviewable contract for an accepted negotiation. Uses the negotiation ID as the contract ID to prevent duplicates. |
-| GET | `/api/contracts/:contractId` | – | Participant-only contract, current and prior versions, amendments, and audit events. |
+| GET | `/api/contracts/:contractId` | – | Participant-only contract, current and prior versions, amendments, and audit events. Materializes due expiry status and an expiry event on access; verifies stored hashes for all hashed versions and returns `integrityStatus`. |
 | POST | `/api/contracts/:contractId/approval` | `{ decision: "approve" \| "reject", reason? }` | Required party review. Rejection requires a reason and releases the negotiation's reservation transactionally. All required approvals activate the contract. |
 | POST | `/api/contracts/:contractId/amendments` | Changed contract terms | Proposes an amendment to an active contract; only one unresolved amendment is allowed. |
 | POST | `/api/contracts/:contractId/amendments/:amendmentId/decision` | `{ decision: "approve" \| "reject", reason? }` | Required party review; final approval revalidates both mandates and creates a new immutable version. Rejection requires a reason. |
+| POST | `/api/contracts/expire` | `Authorization: Bearer <CRON_SECRET>` | Scheduler-only, idempotent worker that expires up to 100 due active or pending-review contracts and appends lifecycle events. Expiry atomically releases contract reservations when no payment record exists; payment-backed reservations remain owned by the payment lifecycle. |
 | GET | `/api/amendments` | – | Lists amendments requiring the caller's review. |
 | POST | `/api/contracts/:contractId/analysis` | – | Participant-only, advisory analysis of the current immutable version. Exact excerpts are checked against source clauses; not legal advice. |
 
@@ -282,7 +283,14 @@ and currency, payment and delivery conditions, expiry, and termination condition
 conditions explicitly do not authorize or process payment. The generated document is a record of
 agreed workflow terms, not a legal opinion, enforceable legal instrument, or digital signature.
 Contract versions and audit events are immutable; current status, approvals, and version pointers
-are maintained on the contract record.
+are maintained on the contract record. New versions store a SHA-256 integrity hash over canonical
+version metadata and terms. Detail reads verify the hash and fail on mismatch; pre-hash legacy
+versions are marked `legacy_unhashed` and are not represented as verified. The detail page provides
+a print-to-PDF export of the authorized contract record and displays the terms hash. An on-page
+renewal reminder appears during the final 30 days; reminders are not emailed or delivered through
+another notification channel. Configure a trusted scheduler and server-only `CRON_SECRET` for
+proactive expiry; detail reads also materialize due expiry. No e-sign provider is configured, and
+the application does not create or imply signatures.
 
 Amendments can change service details, amount, payment/delivery conditions, expiry, or termination
 conditions. Final approval checks current party authorization, active mandates, operation rules,
