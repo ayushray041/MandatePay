@@ -14,8 +14,12 @@ Zod, and performs authorized Firestore operations with the Firebase Admin SDK.
    assigned-agent authorization, lifecycle, time windows, permitted operations, approval rules,
    execution conditions, and available budget. Every mandate change is recorded in immutable
    audit logs.
-3. **Agents** — a registered freelancer profile is keyed by verified Firebase UID. It contains
-   capability, category, currency, and availability data. Discovery omits email and mandate data.
+3. **Agent IAM** — a registered agent profile is keyed by verified Firebase UID and carries a
+   separate immutable random `agentId` with an immutable account owner association. Owner-issued
+   API keys are 256-bit secrets; only HMAC-SHA-256 hashes are persisted. A separate API-key
+   middleware enforces key expiry/revocation, agent activation state, explicit scopes, transactional
+   per-agent rate/quota counters, and server-side session state. Discovery exposes only capability
+   information.
 4. **Negotiations** — two registered agents exchange deterministic offers and counters under their
    private active mandates. The server validates every transition and persists append-only offer
    and activity history. AI assistance is a separate, participant-authorized advisory layer.
@@ -105,6 +109,18 @@ Zod, and performs authorized Firestore operations with the Firebase Admin SDK.
   and provider calls are never exposed to the browser. The project has not performed real or
   credential-backed financial transactions.
 - The client route guard is an experience feature, not an API security boundary.
+- Agent API keys are never accepted as Firebase identity. They are accepted only by dedicated
+  `/api/agent/v1/*` handlers with explicit scopes. The credential maps to its registered agent
+  owner account, and mandate queries additionally require the stored assignment to that account.
+- API key secrets are returned only once. Firestore stores the key ID, scope/expiry/status metadata,
+  and a keyed HMAC-SHA-256 digest; the pepper is a server-only `AGENT_API_KEY_PEPPER` secret. Key
+  revoke/rotation atomically invalidates the paired session. Agent suspension is checked on every
+  key-authenticated request.
+- Per-agent requests-per-minute and UTC-day quotas share atomic Firestore counters across all
+  credentials. Credential management and authenticated API requests append activity/security
+  events without persisting raw keys, authorization headers, or request bodies.
+- Webhook endpoint registration is metadata-only. No event delivery, payload signing, or retry
+  worker is implemented; registered URLs are not fetched by the server.
 
 Contract generation, amendments, sandbox payment processing, and advisory negotiation intelligence
 are implemented. See [API_CONTRACTS.md](./API_CONTRACTS.md),

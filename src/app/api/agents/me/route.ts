@@ -2,20 +2,13 @@ import { adminFirestore } from '@/lib/firebase/admin';
 import { authenticateRequest } from '@/lib/api/auth';
 import { apiError, apiSuccess } from '@/lib/api/responses';
 import { getServerTimestamp } from '@/lib/firebase/firestore';
-import { timestampToIso } from '@/lib/mandates/format';
+import { generateAgentId } from '@/lib/agents/credentials';
+import { ensureAgentRecord, formatAgentRecord } from '@/lib/agents/store';
+import { writeAgentActivity } from '@/lib/agents/audit';
 import {
   agentProfileCreateSchema,
   agentProfileUpdateSchema,
 } from '@/models/agent';
-
-function formatAgent(uid: string, agent: Record<string, unknown>) {
-  return {
-    ...agent,
-    uid,
-    createdAt: timestampToIso(agent.createdAt),
-    updatedAt: timestampToIso(agent.updatedAt),
-  };
-}
 
 export async function GET(request: Request) {
   const authentication = await authenticateRequest(request);
@@ -27,15 +20,11 @@ export async function GET(request: Request) {
   }
 
   try {
-    const snapshot = await adminFirestore.collection('agents').doc(authentication.user.uid).get();
-    if (!snapshot.exists) {
+    const agent = await ensureAgentRecord(authentication.user.uid);
+    if (!agent) {
       return apiError(404, 'AGENT_NOT_REGISTERED', 'Register an agent profile to continue.');
     }
-    const data = snapshot.data();
-    if (!data) {
-      throw new Error('Agent profile document has no data.');
-    }
-    return apiSuccess(formatAgent(snapshot.id, data));
+    return apiSuccess(agent);
   } catch (error: unknown) {
     console.error('Failed to load agent profile.', error);
     return apiError(500, 'INTERNAL_ERROR', 'Agent profile could not be loaded.');
@@ -90,14 +79,41 @@ export async function POST(request: Request) {
       }
 
       const now = getServerTimestamp();
+      const agentId = generateAgentId();
+      const identityRef = firestore.collection('agentIdentities').doc(agentId);
+      const identitySnapshot = await transaction.get(identityRef);
+      if (identitySnapshot.exists) {
+        return { ok: false as const, error: 'AGENT_ID_COLLISION' as const };
+      }
       const agent = {
         ...parsed.data,
         uid,
+        agentId,
+        ownerId: uid,
         displayName: user.displayName,
+        status: 'active',
+        healthStatus: 'unknown',
+        version: 1,
+        runtimeVersion: null,
+        rateLimitPerMinute: 60,
+        dailyQuota: 10_000,
+        lastSeenAt: null,
         createdAt: now,
         updatedAt: now,
       };
       transaction.create(agentRef, agent);
+      transaction.create(identityRef, {
+        agentId,
+        ownerId: uid,
+        agentUid: uid,
+        createdAt: now,
+      });
+      writeAgentActivity(firestore, transaction, {
+        ownerId: uid,
+        agentId,
+        actorId: uid,
+        action: 'agent.registered',
+      });
       return { ok: true as const, agent };
     });
 
@@ -108,9 +124,12 @@ export async function POST(request: Request) {
       if (result.error === 'AGENT_ROLE_REQUIRED') {
         return apiError(403, result.error, 'A freelancer profile is required to register as an agent.');
       }
+      if (result.error === 'AGENT_ID_COLLISION') {
+        return apiError(503, result.error, 'Agent identity allocation collided; retry registration.');
+      }
       return apiError(409, result.error, 'This account already has an agent profile.');
     }
-    return apiSuccess(formatAgent(uid, result.agent), 201);
+    return apiSuccess(formatAgentRecord(uid, result.agent), 201);
   } catch (error: unknown) {
     console.error('Failed to register agent profile.', error);
     return apiError(500, 'INTERNAL_ERROR', 'Agent profile could not be registered.');
@@ -141,6 +160,10 @@ export async function PATCH(request: Request) {
   const firestore = adminFirestore;
   const agentRef = firestore.collection('agents').doc(uid);
   try {
+    const agent = await ensureAgentRecord(uid);
+    if (!agent) {
+      return apiError(404, 'AGENT_NOT_REGISTERED', 'Register an agent profile before updating it.');
+    }
     const result = await firestore.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(agentRef);
       if (!snapshot.exists) {
@@ -162,9 +185,21 @@ export async function PATCH(request: Request) {
       if (!merged.success) {
         return { ok: false as const, error: 'INVALID_AGENT_PROFILE' as const };
       }
+      const version = Number(current.version);
+      if (!Number.isSafeInteger(version) || version < 1) {
+        throw new Error('Stored agent profile version is invalid.');
+      }
       transaction.update(agentRef, {
         ...parsed.data,
+        version: version + 1,
         updatedAt: getServerTimestamp(),
+      });
+      writeAgentActivity(firestore, transaction, {
+        ownerId: uid,
+        agentId: agent.agentId,
+        actorId: uid,
+        action: 'agent.profile.updated',
+        details: { updatedFields: Object.keys(parsed.data).join(',') },
       });
       return { ok: true as const };
     });
@@ -185,7 +220,7 @@ export async function PATCH(request: Request) {
     if (!data) {
       throw new Error('Updated agent profile could not be read.');
     }
-    return apiSuccess(formatAgent(uid, data));
+    return apiSuccess(formatAgentRecord(uid, data));
   } catch (error: unknown) {
     console.error('Failed to update agent profile.', error);
     return apiError(500, 'INTERNAL_ERROR', 'Agent profile could not be updated.');

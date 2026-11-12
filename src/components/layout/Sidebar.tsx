@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   ArrowLeftRight,
+  Bot,
   BriefcaseBusiness,
   FileCheck2,
   FileText,
@@ -20,6 +21,7 @@ const links = [
   { href: '/amendments', label: 'Amendments', icon: FileCheck2 },
   { href: '/payments', label: 'Payments', icon: Wallet },
   { href: '/mandates', label: 'Mandates', icon: ShieldCheck },
+  { href: '/agents', label: 'Agent Management', icon: Bot },
 ];
 
 export const Sidebar: React.FC = () => {

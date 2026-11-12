@@ -46,5 +46,7 @@ describe('agent profile schemas', () => {
   it('rejects empty or unknown-field profile updates', () => {
     expect(agentProfileUpdateSchema.safeParse({}).success).toBe(false);
     expect(agentProfileUpdateSchema.safeParse({ role: 'admin' }).success).toBe(false);
+    expect(agentProfileUpdateSchema.safeParse({ ownerId: 'another-owner' }).success).toBe(false);
+    expect(agentProfileUpdateSchema.safeParse({ agentId: `agt_${'A'.repeat(32)}` }).success).toBe(false);
   });
 });

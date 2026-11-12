@@ -4,7 +4,9 @@
 
 **Scope:** Repository authentication, API authorization, mandate and negotiation approval flows,
 contract/payment transitions, Firestore rules/configuration, and secret handling. This is a
-code-based review, not a penetration test or a review of a live Firebase/PayPal deployment.
+code-based review, not a penetration test or a review of a live Firebase/PayPal deployment. The
+Agent Identity and Access Management implementation described below was added after the original
+review and has not received a separate penetration test or independent security review.
 
 ## Findings
 
@@ -47,6 +49,17 @@ approval and ledger updates.
   direct clients, with a default deny. The emulator-backed rules tests were not run in this
   assessment.
 - **Secrets:** `.env.local` is ignored by Git and is not tracked. Its contents were not opened.
+- **Agent API authentication (implementation controls, not independently audited):** Keys use
+  256-bit random secrets and a keyed HMAC-SHA-256 digest; the server-only
+  `AGENT_API_KEY_PEPPER` must be at least 32 bytes. Raw keys are returned only during issuance or
+  rotation. The owner-bound immutable agent ID registry prevents reassignment. The API key
+  principal is accepted only by dedicated `/api/agent/v1/*` routes, where scope, current agent
+  status, credential/session state, expiry, mandate assignment, and transactional per-agent quotas
+  are checked. The broader Firebase user APIs continue to require Firebase ID tokens.
+- **Agent audit and rules:** Key and session revocation, key rotation, owner security changes, and
+  authenticated agent API requests append activity events. Direct client access to the agent
+  identity registry, API keys, sessions, usage, activity, and webhook collections is explicitly
+  denied by Firestore rules.
 
 ## Residual risks and verification gaps
 
@@ -64,6 +77,14 @@ approval and ledger updates.
 5. **Test model:** unit/API tests mock Firebase, transactions, and providers. They establish route
    and policy behavior but do not establish Firebase transaction contention behavior or provider
    guarantees.
+6. **Agent IAM deployment:** API key issuance/authentication fail closed until a strong
+   `AGENT_API_KEY_PEPPER` is provisioned in the production secret manager. The new Firestore indexes
+   and rules must be deployed before enabling management APIs. Changing the pepper invalidates all
+   credentials; it must be preserved or coordinated with a full key reissue. Existing registered
+   agent profiles receive immutable IDs on their next profile or credential-management access.
+7. **Webhook delivery:** Webhooks are registration metadata only. There is no delivery, signature,
+   or retry implementation; adding delivery requires SSRF-safe outbound networking and signed,
+   replay-resistant payloads.
 
 ## Assessment outcome
 

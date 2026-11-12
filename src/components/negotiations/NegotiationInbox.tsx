@@ -11,7 +11,7 @@ import { discoverAgents, getMyAgentProfile } from '@/lib/agents/client';
 import { createNegotiation, listNegotiations } from '@/lib/negotiations/client';
 import { listMandates } from '@/lib/mandates/client';
 import { formatMinorAmount } from '@/lib/mandates/money';
-import { agentCategories, type AgentProfile } from '@/models/agent';
+import { agentCategories, type AgentDiscoveryProfile, type AgentProfile } from '@/models/agent';
 import { type MandateRecord } from '@/models/mandate';
 import { type NegotiationRecord, type NegotiationStatus } from '@/models/negotiation';
 
@@ -30,7 +30,7 @@ export function NegotiationInbox() {
   const router = useRouter();
   const { user } = useAuth();
   const [agentProfile, setAgentProfile] = useState<AgentProfile | null>(null);
-  const [agents, setAgents] = useState<AgentProfile[]>([]);
+  const [agents, setAgents] = useState<AgentDiscoveryProfile[]>([]);
   const [mandates, setMandates] = useState<MandateRecord[]>([]);
   const [negotiations, setNegotiations] = useState<NegotiationRecord[]>([]);
   const [category, setCategory] = useState('');

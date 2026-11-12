@@ -113,6 +113,11 @@ describe.skipIf(!emulatorAddress)('Firestore security rules', () => {
     await environment.withSecurityRulesDisabled(async (context) => {
       const db = context.firestore();
       await setDoc(doc(db, 'agents/alice'), { uid: 'alice', displayName: 'Alice' });
+      await setDoc(doc(db, 'agentIdentities/agt_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'), {
+        agentId: 'agt_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        ownerId: 'alice',
+        agentUid: 'alice',
+      });
       await setDoc(doc(db, 'negotiations/negotiation-1'), {
         initiatorAgentId: 'alice',
         recipientAgentId: 'bob',
@@ -125,10 +130,30 @@ describe.skipIf(!emulatorAddress)('Firestore security rules', () => {
         sequence: 1,
         actorAgentId: 'alice',
       });
+
+      it('denies direct client access to agent credentials, sessions, usage, activity and webhooks', async () => {
+        await environment.withSecurityRulesDisabled(async (context) => {
+          const db = context.firestore();
+          await setDoc(doc(db, 'agentApiKeys/key-1'), { ownerId: 'alice', tokenHash: 'secret-hash' });
+          await setDoc(doc(db, 'agentSessions/session-1'), { ownerId: 'alice', status: 'active' });
+          await setDoc(doc(db, 'agentUsage/agent-1'), { dailyCount: 1 });
+          await setDoc(doc(db, 'agentActivity/event-1'), { ownerId: 'alice', action: 'agent.api_key.created' });
+          await setDoc(doc(db, 'agentWebhooks/webhook-1'), { ownerId: 'alice', url: 'https://example.com' });
+        });
+
+        const aliceDb = environment.authenticatedContext('alice').firestore();
+        await assertFails(getDoc(doc(aliceDb, 'agentApiKeys/key-1')));
+        await assertFails(getDoc(doc(aliceDb, 'agentSessions/session-1')));
+        await assertFails(getDoc(doc(aliceDb, 'agentUsage/agent-1')));
+        await assertFails(getDoc(doc(aliceDb, 'agentActivity/event-1')));
+        await assertFails(getDoc(doc(aliceDb, 'agentWebhooks/webhook-1')));
+        await assertFails(setDoc(doc(aliceDb, 'agentApiKeys/forged'), { tokenHash: 'attacker' }));
+      });
     });
 
     const aliceDb = environment.authenticatedContext('alice').firestore();
     await assertFails(getDoc(doc(aliceDb, 'agents/alice')));
+    await assertFails(getDoc(doc(aliceDb, 'agentIdentities/agt_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA')));
     await assertFails(getDoc(doc(aliceDb, 'negotiations/negotiation-1')));
     await assertFails(getDoc(doc(aliceDb, 'negotiations/negotiation-1/offers/offer-1')));
     await assertFails(getDoc(doc(aliceDb, 'negotiations/negotiation-1/events/event-1')));

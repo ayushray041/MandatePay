@@ -15,6 +15,30 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /agentIdentities/{agentId} {
+      allow read, write: if false;
+    }
+
+    match /agentApiKeys/{keyId} {
+      allow read, write: if false;
+    }
+
+    match /agentSessions/{sessionId} {
+      allow read, write: if false;
+    }
+
+    match /agentUsage/{agentId} {
+      allow read, write: if false;
+    }
+
+    match /agentActivity/{eventId} {
+      allow read, write: if false;
+    }
+
+    match /agentWebhooks/{webhookId} {
+      allow read, write: if false;
+    }
+
     match /mandates/{mandateId} {
       allow read, write: if false;
     }

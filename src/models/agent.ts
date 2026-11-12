@@ -60,6 +60,23 @@ export const agentProfileUpdateSchema = agentProfileFieldsSchema
 
 export const agentProfileSchema = agentProfileFieldsSchema.extend({
   uid: z.string().min(1),
+  agentId: z.string().regex(/^agt_[A-Za-z0-9_-]{32}$/),
+  ownerId: z.string().min(1).max(128),
+  displayName: z.string().min(1).max(100),
+  status: z.enum(['active', 'suspended']),
+  healthStatus: z.enum(['healthy', 'unknown']),
+  version: z.number().int().positive(),
+  runtimeVersion: z.string().max(64).nullable(),
+  rateLimitPerMinute: z.number().int().min(1).max(600),
+  dailyQuota: z.number().int().min(1).max(100_000),
+  lastSeenAt: z.string().nullable(),
+  createdAt: z.string().nullable(),
+  updatedAt: z.string().nullable(),
+});
+
+export const agentDiscoveryProfileSchema = agentProfileFieldsSchema.extend({
+  uid: z.string().min(1),
+  agentId: z.string().regex(/^agt_[A-Za-z0-9_-]{32}$/).optional(),
   displayName: z.string().min(1).max(100),
   createdAt: z.string().nullable(),
   updatedAt: z.string().nullable(),
@@ -67,4 +84,5 @@ export const agentProfileSchema = agentProfileFieldsSchema.extend({
 
 export type AgentCategory = z.infer<typeof agentCategorySchema>;
 export type AgentProfile = z.infer<typeof agentProfileSchema>;
+export type AgentDiscoveryProfile = z.infer<typeof agentDiscoveryProfileSchema>;
 export type AgentProfileCreateInput = z.infer<typeof agentProfileCreateSchema>;

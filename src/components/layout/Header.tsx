@@ -15,6 +15,7 @@ const links = [
   { href: '/amendments', label: 'Amendments' },
   { href: '/payments', label: 'Payments' },
   { href: '/mandates', label: 'Mandates' },
+  { href: '/agents', label: 'Agent Management' },
 ];
 
 export const Header: React.FC = () => {

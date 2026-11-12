@@ -31,10 +31,61 @@ capability information only, never email or mandate information.
 | POST | `/api/agents/me` | Agent capabilities and availability | Creates a profile for a `freelancer` user. UID and display name are server-assigned. |
 | PATCH | `/api/agents/me` | Partial agent capabilities and availability | Updates the caller's profile; the merged profile is validated. |
 | GET | `/api/agents?category=software` | Optional category | Lists up to 50 profiles, excluding the caller. |
+| GET | `/api/agents/me/keys` | – | Lists credential metadata for the authenticated owner. Hashes and secrets are never returned. |
+| POST | `/api/agents/me/keys` | `{ name, scopes, expiresAt }` | Creates a scoped key and returns the raw secret once. Expiration must be future and within one year. |
+| DELETE | `/api/agents/me/keys/:keyId` | – | Immediately revokes the key and its associated session. |
+| POST | `/api/agents/me/keys/:keyId/rotate` | – | Atomically revokes the old key/session and issues a replacement with the same scopes and expiration. The new secret is returned once. |
+| PATCH | `/api/agents/me/status` | `{ status: "active" \| "suspended" }` | Owner-only activation/suspension. Suspended agents cannot authenticate API keys. |
+| PATCH | `/api/agents/me/security` | `{ rateLimitPerMinute?, dailyQuota? }` | Owner-only quota configuration: 1–600 requests per minute and 1–100,000 per UTC day. |
+| GET | `/api/agents/me/activity` | – | Returns up to 50 owner-scoped activity/security events. |
+| GET | `/api/agents/me/sessions` | – | Lists up to 50 owner-scoped API sessions without credential material. |
+| DELETE | `/api/agents/me/sessions/:sessionId` | – | Revokes the session and associated API key. |
+| GET / POST | `/api/agents/me/webhooks` | HTTPS URL and event names | Lists or registers owner-scoped webhook endpoint metadata. |
+| DELETE | `/api/agents/me/webhooks/:webhookId` | – | Revokes an endpoint registration. |
 
 Supported categories are `software`, `design`, `writing`, `marketing`, `consulting`, `finance`,
 `legal`, and `other`. Profiles include a headline, bio, per-category capabilities, supported
-currencies, and availability.
+currencies, and availability. Registration creates a random immutable `agt_` identifier and
+associates it with the verified Firebase account as its immutable owner. Existing agent accounts are
+assigned an ID on their next profile/credential management access. Caller-supplied identity and
+ownership fields are rejected. Status, health, profile version, runtime version, and usage limits
+are managed by server endpoints; ownership transfer is not supported.
+
+Agent API keys are 256-bit random secrets formatted as `mpa_live_<keyId>_<secret>`. The server stores
+only an HMAC-SHA-256 hash keyed by server-only `AGENT_API_KEY_PEPPER` (at least 32 bytes). Key
+issuance and authentication fail closed when that environment secret is missing or too short.
+Generate it with a cryptographically secure secret manager and do not commit it. The raw secret is
+shown only by create/rotate responses, held in the UI only in memory until dismissed, and must be
+copied into a secret manager. A hash, raw key, or authorization header is never returned by
+credential-list APIs. Rotations preserve the current expiration and permissions; create a separate
+key to extend a credential lifetime. Changing the pepper invalidates every existing key; preserve it
+in the secret manager or coordinate a full credential reissue during pepper rotation.
+
+API-key authentication uses `Authorization: Bearer mpa_live_...`, is separate from Firebase user
+authentication, and is accepted only by the scoped `/api/agent/v1/*` endpoints below. It never
+authenticates `/api/agents/me`, user, owner, or general Firebase endpoints. Each key is bound to the
+immutable agent ID and verified account owner.
+The middleware checks the keyed hash, key/session status, expiry, current agent status, ownership,
+scope, and atomically updated per-agent UTC minute/day counters on every request. Default limits
+are 60 requests/minute and 10,000/day. A `429` response includes `Retry-After`. Valid requests
+update the runtime version from a validated optional `X-Agent-Version` header and record an
+append-only activity event. One server-side session is maintained per key; revoking either the
+session or key invalidates both immediately.
+
+Suspension blocks all API keys while the agent is suspended. Reactivation makes any still-active,
+unexpired keys usable again; owners should revoke or rotate credentials suspected of compromise.
+
+Supported API-key scopes and endpoints:
+
+| Scope | Method | Path | Authorization |
+|-------|--------|------|---------------|
+| `agent:profile:read` | GET | `/api/agent/v1/me` | Returns only the authenticated agent profile. |
+| `mandates:read` | GET | `/api/agent/v1/mandates` | Lists only mandates whose assigned agent is this credential's bound account. |
+| `mandates:read` | GET | `/api/agent/v1/mandates/:mandateId/authorizations` | Lists only operation records created by the authenticated agent for that mandate. |
+| `mandates:authorize` | POST | `/api/agent/v1/mandates/:mandateId/authorizations` | Reuses the same transactional mandate policy and reservation logic as Firebase-authenticated requests. The server derives agent identity from the credential and rejects mandates assigned to another agent. |
+
+Webhook registration currently stores HTTPS endpoint and event-subscription metadata only. The
+platform does not yet deliver events, sign webhook payloads, or retry failed deliveries.
 
 ### Mandates
 

@@ -103,7 +103,10 @@ describe('agent APIs', () => {
       create: vi.fn(),
     };
     mocks.collection.mockImplementation((name: string) => ({
-      doc: () => name === 'agents' ? profileRef : userRef,
+      doc: () => name === 'agents' ? profileRef : name === 'users' ? userRef : {
+        collection: name,
+        id: 'new-agent-identity',
+      },
     }));
     mocks.runTransaction.mockImplementation(
       async (callback: (tx: typeof transaction) => Promise<unknown>) => callback(transaction),
@@ -112,12 +115,26 @@ describe('agent APIs', () => {
     const response = await registerAgent(request(validProfile));
 
     expect(response.status).toBe(201);
-    expect(await response.json()).toMatchObject({
-      data: { uid: 'agent-1', displayName: 'Verified Agent' },
+    const body = await response.json();
+    expect(body).toMatchObject({
+      data: {
+        uid: 'agent-1',
+        agentId: expect.stringMatching(/^agt_[A-Za-z0-9_-]{32}$/),
+        ownerId: 'agent-1',
+        displayName: 'Verified Agent',
+        status: 'active',
+      },
     });
     expect(transaction.create).toHaveBeenCalledWith(
       profileRef,
       expect.objectContaining({ uid: 'agent-1', displayName: 'Verified Agent' }),
     );
+    const createdIdentity = transaction.create.mock.calls.find(([reference]) => (
+      (reference as { collection?: string }).collection === 'agentIdentities'
+    ));
+    expect(createdIdentity?.[1]).toMatchObject({
+      ownerId: 'agent-1',
+      agentUid: 'agent-1',
+    });
   });
 });

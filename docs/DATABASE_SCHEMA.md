@@ -2,12 +2,20 @@
 
 Firestore is the primary data store. Client access is deliberately limited: user profiles may be
 read by their owner; agents, mandates, authorizations, negotiations, contracts, and their histories
-are accessed through authenticated server APIs only.
+are accessed through authenticated server APIs only. Agent IAM records are server-only and every
+credential write, session, usage counter, webhook registration, and activity event is scoped to the
+authenticated agent owner.
 
 | Collection | Document ID | Main fields | Purpose |
 |------------|-------------|-------------|---------|
 | `users` | Firebase `uid` | `uid`, `email`, `displayName`, `role`, `createdAt`, `updatedAt` | User profile created and updated by trusted API handlers. Self-service roles are `client` or `freelancer`. |
-| `agents` | Firebase `uid` | `uid`, `displayName`, `headline`, `bio`, `categories`, `capabilities`, `supportedCurrencies`, `availability`, timestamps | Registered freelancer identity and discovery capabilities. Does not contain email or mandate data. |
+| `agents` | Firebase `uid` | `uid`, immutable `agentId`, immutable `ownerId`, `displayName`, capabilities, `status`, `healthStatus`, profile `version`, `runtimeVersion`, `rateLimitPerMinute`, `dailyQuota`, `lastSeenAt`, timestamps | One registered agent identity per owning Firebase account, with profile, runtime health, and server-enforced quota configuration. |
+| `agentIdentities` | Immutable `agentId` | `agentId`, `ownerId`, `agentUid`, `createdAt` | Transactionally allocated identity registry. A document ID can be claimed once; the owner association is immutable. |
+| `agentApiKeys` | Random key ID | `keyId`, `agentId`, `ownerId`, `name`, display-only prefix, HMAC-SHA-256 `tokenHash`, scopes, status, expiry, last-use and revocation timestamps | API credential metadata. The raw high-entropy secret is returned only during issuance/rotation and is never persisted. |
+| `agentSessions` | API key ID | `keyId`, `agentId`, `ownerId`, status, `createdAt`, `lastSeenAt`, `expiresAt`, optional revocation time | One revocable server-side session per API credential. Session and key revocation are atomic. |
+| `agentUsage` | Immutable `agentId` | UTC minute/day window identifiers, request counters, `updatedAt` | Shared per-agent quota counters updated atomically across all keys. |
+| `agentActivity` | Auto ID | `ownerId`, `agentId`, actor, action, outcome, scope, request method/path, safe details, `createdAt` | Append-only agent activity and security events; raw credentials and request bodies are excluded. |
+| `agentWebhooks` | Auto ID | `ownerId`, `agentId`, HTTPS URL, subscribed event names, status, timestamps | Owner-managed webhook endpoint registrations. Delivery/signature generation is not enabled. |
 | `mandates` | Auto ID | `ownerId`, one `authorizedAgentId`, title and description, `durationType`, `startsAt`, nullable `expiresAt`, `spendingLimitMinor`, `spentAmountMinor`, negotiation `reservedAmountMinor`, pending-approval `authorizationReservedAmountMinor`, `velocityUsage`, currency, allowed operations, approval requirements (approver IDs, all/quorum), execution conditions, lifecycle/version, emergency suspension, renewal request, optional pending limit request, timestamps | Server-enforced spending authority. Budget and velocity counters are mutated transactionally; only the owner and assigned agent can access it through APIs. |
 | `mandates/{id}/versions` | Zero-padded version number | `version`, `createdBy`, `createdAt`, `reason`, complete `snapshot` | Append-only mandate policy/lifecycle snapshots. Direct client access is denied. |
 | `mandateAuthorizations` | Auto ID or SHA-256 idempotency key | `mandateId`, owner and assigned-agent IDs, operation, amount, currency, description, captured `mandateVersion`, approver IDs/quorum/approvals, pending reservation window keys, status, idempotency fingerprint, timestamps | Operation authorization requests and decisions. Pending requests reserve both total and UTC velocity budget transactionally; retries with the same idempotency key do not create duplicate reservations. Direct client access is denied. |
@@ -54,6 +62,8 @@ accepting client-provided identity or location.
 - Authorization listing by `mandateId`, ordered by `createdAt`.
 - Contract listing by `ownerId`, ordered by `createdAt`.
 - Agent discovery by category and `updatedAt`.
+- Agent API key listing by `ownerId` and `createdAt`.
+- Agent session, activity, and webhook listings by owner/agent and their respective timestamps.
 - Negotiation inbox queries by `initiatorAgentId` or `recipientAgentId`, ordered by `updatedAt`.
 - Contract participant listing by `participantIds` and `updatedAt`.
 - Payment history listing by `participantIds` and `updatedAt`.
@@ -64,7 +74,8 @@ accepting client-provided identity or location.
 Rules in `firestore.rules`:
 
 - Allow users to read only their own profile; all profile writes go through the authenticated API.
-- Deny direct client reads and writes for agent profiles, mandates, authorizations, negotiations,
+- Deny direct client reads and writes for agent profiles, identity registry, API credentials,
+  sessions, usage counters, activity, webhook registrations, mandates, authorizations, negotiations,
   negotiation offers/events, contracts, contract versions, amendments, contract events, payments,
   payment events, and webhook idempotency receipts. APIs perform identity, participant, and
   ownership checks because Firebase Admin SDK access bypasses rules.

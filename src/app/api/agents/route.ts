@@ -32,8 +32,15 @@ export async function GET(request: Request) {
       .map((agent) => {
         const data = agent.data();
         return {
-          ...data,
           uid: agent.id,
+          ...(typeof data.agentId === 'string' ? { agentId: data.agentId } : {}),
+          displayName: data.displayName,
+          headline: data.headline,
+          bio: data.bio,
+          categories: data.categories,
+          capabilities: data.capabilities,
+          supportedCurrencies: data.supportedCurrencies,
+          availability: data.availability,
           createdAt: timestampToIso(data.createdAt),
           updatedAt: timestampToIso(data.updatedAt),
         };
