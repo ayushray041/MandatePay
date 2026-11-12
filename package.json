@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "test:rules": "firebase emulators:exec --project demo-mandatepay --only firestore \"vitest run src/lib/firebase/firestore.rules.test.ts\""
   },
   "dependencies": {
     "@google/genai": "^3.0.0",

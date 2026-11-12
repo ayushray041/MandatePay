@@ -1,68 +1,27 @@
 # Development Status
 
-## Authentication implementation
-
-The project now includes a working Firebase authentication flow for local development and a server-side identity layer for authenticated API routes.
+## Phase 1: Authentication and database foundation
 
 ### Completed
-- Centralized Firebase client initialization in `src/lib/firebase/client.ts`.
-- Centralized Firebase browser auth helpers in `src/lib/firebase/auth-client.ts`.
-- Hardened Firebase Admin initialization in `src/lib/firebase/admin.ts`.
-- Added token verification in `src/lib/firebase/verify-token.ts` for `Authorization: Bearer <token>` headers.
-- Reworked the authenticated profile API at `src/app/api/users/me/route.ts` to use Firestore admin APIs correctly and to restrict writes to the current verified UID.
-- Split client-side login/signup logic into `LoginForm.tsx` and `SignupForm.tsx` while keeping the route pages as server components.
-- Wrapped the app with a browser-safe `AuthProvider` client component.
+- Email/password Firebase signup and login, explicit browser-local auth persistence, logout, loading/error states, and a client-side guard for workspace routes.
+- Server-created Firestore profiles with UID/email from verified tokens, timestamps, and a signup role restricted to `client` or `freelancer`. Profile updates are limited to `displayName`.
+- Shared Firestore document/timestamp utilities, collection names, a contracts owner/created-time index, and configured Security Rules in `firestore.rules`.
+- Protected profile API handlers verify bearer ID tokens (including revocation), derive identity only from token claims, validate request bodies with strict Zod schemas, and return consistent response envelopes.
+- Firebase health diagnostics and the implemented profile API use the same response format. Future workflow endpoints remain unimplemented.
 
-### Security improvements
-- Firebase Admin SDK initialization is restricted to server-side modules and guarded against duplicate app creation.
-- User identity is derived from verified Firebase ID tokens rather than client-provided data.
-- Authenticated profile endpoints reject malformed or missing bearer tokens.
-- Profile writes are limited to a confirmed allowlist (`displayName` only for profile creation/update).
-- No `any`, `@ts-ignore`, or mock authentication bypass was introduced.
+### Verification
+- `npx tsc --noEmit`: passed.
+- `npm run lint`: passed.
+- `npm run build`: passed.
+- `npm test`: passed — 3 test files passed, 1 skipped; 11 tests passed, 2 skipped.
+- Firestore rules tests cover profile confidentiality, denied direct profile writes, contract ownership, and denied direct payment access. They are skipped unless a Firestore emulator is available.
 
-## Files modified
-- `src/lib/firebase/admin.ts`
-- `src/lib/firebase/client.ts`
-- `src/lib/firebase/auth-client.ts`
-- `src/lib/firebase/verify-token.ts`
-- `src/components/providers/AuthProvider.tsx`
-- `src/app/api/users/me/route.ts`
-- `src/app/api/health/firebase/route.ts`
-- `src/app/login/page.tsx`
-- `src/app/login/LoginForm.tsx`
-- `src/app/signup/page.tsx`
-- `src/app/signup/SignupForm.tsx`
-- `src/app/contracts/page.tsx`
-- `src/app/dashboard/page.tsx`
-- `src/app/negotiations/page.tsx`
-- `src/app/payments/page.tsx`
+### Firebase and emulator status
+- The production build loaded the configured Firebase client settings; this does not verify a live Firebase Auth or Firestore operation.
+- No credential-backed signup, login, profile write, or rules deployment was performed.
+- `npm run test:rules` could not start the Firestore emulator because the installed Java runtime is older than the JDK 21 minimum required by the installed `firebase-tools`. Install/use JDK 21, then rerun the rules suite.
 
-## Verification results
-- TypeScript: `npx tsc --noEmit` passed.
-- Production build: `npm run build` passed.
-- Lint: `npm run lint` passed.
-
-## Firebase connectivity
-- Local runtime Firebase connectivity was checked using the health endpoint.
-- Current result: the endpoint responds successfully, but the environment is not configured with Firebase client or service-account credentials, so it reports `success: false` and `project_mismatch` / `firestore: unavailable`.
-- This is the expected state without valid Firebase environment variables and credentials.
-
-## Manual testing instructions
-The following scenarios require a real Firebase project and valid environment variables before they can be executed successfully:
-
-1. Set `NEXT_PUBLIC_FIREBASE_API_KEY`, `NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN`, `NEXT_PUBLIC_FIREBASE_PROJECT_ID`, and related client variables.
-2. Set Firebase Admin credentials via the standard environment mechanism expected by `firebase-admin` (for example `GOOGLE_APPLICATION_CREDENTIALS` or a service account JSON file).
-3. Confirm `FIREBASE_PROJECT_ID` or `GCLOUD_PROJECT` matches the configured project.
-4. Run the app locally and hit `/api/health/firebase` to confirm connectivity.
-5. Sign up with a real test email and inspect the Firebase Authentication users list.
-6. Verify the user profile appears in Firestore under `users/{uid}`.
-7. Log in with the correct password and confirm the ID token is accepted by `/api/users/me`.
-8. Attempt login with an incorrect password to confirm rejection.
-9. Log out and verify the browser auth state resets.
-10. Request `/api/users/me` without a token and verify 401 responses.
-11. Send an invalid bearer token and verify rejection.
-
-## Remaining issues
-- Real Firebase credential-backed auth and Firestore verification is still pending until environment variables and access credentials are provided.
-- No custom Firestore security rules or production deployment settings have been added yet.
-- The app is ready for local code validation but not for real-user authentication without a configured Firebase project.
+### Remaining work
+- Run the emulator-backed rules tests under JDK 21.
+- Verify signup/login/profile creation against an authorized Firebase project and deploy `firestore.rules` plus `firestore.indexes.json` to that project.
+- Build the remaining contract, negotiation, amendment, and payment APIs; their planned contracts are documented in [API_CONTRACTS.md](./API_CONTRACTS.md).
