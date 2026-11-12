@@ -57,6 +57,9 @@ export async function POST(request: Request, context: RouteContext) {
       }
       const participant = assertNegotiationParticipant(negotiation, uid);
 
+      if (isNegotiationTerminal(negotiation.status)) {
+        throw new NegotiationError(409, 'NEGOTIATION_CLOSED', 'Negotiation is already closed.');
+      }
       if (isNegotiationExpired(negotiation, now)) {
         const eventCount = Number(negotiation.eventCount ?? 0) + 1;
         transaction.update(negotiationRef, {
@@ -70,9 +73,6 @@ export async function POST(request: Request, context: RouteContext) {
           actorAgentId: uid,
         });
         return { expired: true as const };
-      }
-      if (isNegotiationTerminal(negotiation.status)) {
-        throw new NegotiationError(409, 'NEGOTIATION_CLOSED', 'Negotiation is already closed.');
       }
 
       const status = negotiation.status;

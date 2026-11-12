@@ -42,7 +42,8 @@ const statusStyles: Record<MandateStatus, string> = {
 
 function percentage(mandate: MandateRecord): number {
   return Math.min(100, Math.round(
-    mandate.spentAmountMinor / mandate.spendingLimitMinor * 100,
+    (mandate.spentAmountMinor + mandate.reservedAmountMinor)
+      / mandate.spendingLimitMinor * 100,
   ));
 }
 
@@ -299,6 +300,9 @@ export function MandateDetail({ mandateId }: { mandateId: string }) {
               <p className="mt-1 text-sm text-mp-medium-grey">
                 {formatMinorAmount(mandate.spentAmountMinor, mandate.currency)} committed
               </p>
+              <p className="mt-1 text-sm text-mp-medium-grey">
+                {formatMinorAmount(mandate.reservedAmountMinor, mandate.currency)} reserved by accepted negotiations
+              </p>
             </div>
             <ShieldCheck className="text-mp-orange" size={24} aria-hidden="true" />
           </div>
@@ -312,7 +316,12 @@ export function MandateDetail({ mandateId }: { mandateId: string }) {
             </div>
             <p className="mt-2 text-sm text-mp-medium-grey">
               {formatMinorAmount(
-                Math.max(0, mandate.spendingLimitMinor - mandate.spentAmountMinor),
+                Math.max(
+                  0,
+                  mandate.spendingLimitMinor
+                    - mandate.spentAmountMinor
+                    - mandate.reservedAmountMinor,
+                ),
                 mandate.currency,
               )} remaining
             </p>

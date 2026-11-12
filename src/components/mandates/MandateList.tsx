@@ -20,7 +20,10 @@ const statusStyles: Record<MandateStatus, string> = {
 function spendingPercent(mandate: MandateRecord): number {
   return Math.min(
     100,
-    Math.round((mandate.spentAmountMinor / mandate.spendingLimitMinor) * 100),
+    Math.round(
+      ((mandate.spentAmountMinor + mandate.reservedAmountMinor)
+        / mandate.spendingLimitMinor) * 100,
+    ),
   );
 }
 
@@ -145,7 +148,7 @@ export function MandateList() {
                   </Link>
                 </div>
 
-                <div className="mt-5 grid gap-4 border-t border-mp-warm-grey pt-4 sm:grid-cols-3">
+                <div className="mt-5 grid gap-4 border-t border-mp-warm-grey pt-4 sm:grid-cols-4">
                   <div>
                     <p className="mp-kicker">Spending authority</p>
                     <p className="mt-1 font-semibold">
@@ -156,6 +159,12 @@ export function MandateList() {
                     <p className="mp-kicker">Committed</p>
                     <p className="mt-1 font-semibold">
                       {formatMinorAmount(mandate.spentAmountMinor, mandate.currency)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="mp-kicker">Reserved</p>
+                    <p className="mt-1 font-semibold">
+                      {formatMinorAmount(mandate.reservedAmountMinor, mandate.currency)}
                     </p>
                   </div>
                   <div>

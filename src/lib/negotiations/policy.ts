@@ -80,6 +80,21 @@ export function assertOfferWithinMandate(
     );
   }
 
+  assertTermsWithinMandate(mandate, terms, now);
+}
+
+export function assertTermsWithinMandate(
+  mandate: StoredData,
+  terms: NegotiationOfferTerms,
+  now: Date,
+): void {
+  if (mandate.currency !== terms.currency) {
+    throw new NegotiationError(
+      409,
+      'CURRENCY_MISMATCH',
+      'Offer currency must match both participants’ mandate currencies.',
+    );
+  }
   try {
     assertExecutionAllowed(
       mandate,

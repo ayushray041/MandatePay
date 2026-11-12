@@ -137,6 +137,7 @@ export const mandateRecordSchema = z
     description: z.string(),
     spendingLimitMinor: minorUnitAmountSchema,
     spentAmountMinor: z.number().int().nonnegative(),
+    reservedAmountMinor: z.number().int().nonnegative().default(0),
     currency: mandateCurrencySchema,
     startsAt: z.string().nullable(),
     expiresAt: z.string().nullable(),

@@ -151,12 +151,13 @@ export async function PATCH(request: Request, context: RouteContext) {
 
       if (
         parsed.data.spendingLimitMinor !== undefined
-        && parsed.data.spendingLimitMinor < current.spentAmountMinor
+        && parsed.data.spendingLimitMinor
+          < current.spentAmountMinor + (current.reservedAmountMinor ?? 0)
       ) {
         throw new MandateError(
           409,
           'LIMIT_BELOW_COMMITTED_SPEND',
-          'Spending limit cannot be lower than already authorized spend.',
+          'Spending limit cannot be lower than authorized spend plus accepted negotiation reservations.',
         );
       }
 

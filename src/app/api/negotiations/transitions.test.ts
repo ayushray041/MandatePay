@@ -1,0 +1,437 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+type TestReference = {
+  kind: string;
+  id: string;
+  collection: (name: string) => { doc: (id?: string) => TestReference };
+};
+type TestTransaction = {
+  get: (reference: TestReference) => Promise<{
+    exists: boolean;
+    data: () => Record<string, unknown> | undefined;
+  }>;
+  create: ReturnType<typeof vi.fn>;
+  update: ReturnType<typeof vi.fn>;
+};
+
+const mocks = vi.hoisted(() => ({
+  authenticateRequest: vi.fn(),
+  firestore: {
+    collection: vi.fn(),
+    runTransaction: vi.fn(),
+  },
+  transaction: {
+    get: vi.fn(),
+    create: vi.fn(),
+    update: vi.fn(),
+  },
+  negotiationData: {
+    initiatorAgentId: 'agent-1',
+    recipientAgentId: 'agent-2',
+    initiatorMandateId: 'mandate-1',
+    recipientMandateId: null as string | null,
+    title: 'Billing integration',
+    status: 'offer_submitted',
+    expiresAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
+    currentOfferId: 'offer-1',
+    currentOffer: {
+      sequence: 1,
+      submittedByAgentId: 'agent-1',
+      mandateId: 'mandate-1',
+      terms: {
+        title: 'API integration',
+        category: 'software',
+        description: 'Build and document the billing service integration.',
+        amountMinor: 12_000,
+        currency: 'USD',
+        deliveryDays: 14,
+      },
+      createdAt: new Date(),
+    },
+    offerCount: 1,
+    eventCount: 2,
+  },
+  otherNegotiationData: null as Record<string, unknown> | null,
+  mandates: {
+    'mandate-1': {
+      authorizedAgentId: 'agent-1',
+      status: 'active',
+      startsAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      spendingLimitMinor: 20_000,
+      spentAmountMinor: 0,
+      reservedAmountMinor: 0,
+      currency: 'USD',
+      allowedOperations: ['contract.amend'],
+      executionConditions: {
+        maximumOperationAmountMinor: 15_000,
+        requiredDescriptionTerms: [],
+      },
+      approvalRequirements: { ownerApprovalOperations: [] },
+    },
+    'mandate-2': {
+      authorizedAgentId: 'agent-2',
+      status: 'active',
+      startsAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+      expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+      spendingLimitMinor: 20_000,
+      spentAmountMinor: 0,
+      reservedAmountMinor: 0,
+      currency: 'USD',
+      allowedOperations: ['contract.amend'],
+      executionConditions: {
+        maximumOperationAmountMinor: 15_000,
+        requiredDescriptionTerms: [],
+      },
+      approvalRequirements: { ownerApprovalOperations: [] },
+    },
+  } as Record<string, Record<string, unknown>>,
+  agentData: {
+    'agent-1': { categories: ['software'], supportedCurrencies: ['USD'] },
+    'agent-2': { categories: ['software'], supportedCurrencies: ['USD'] },
+  } as Record<string, Record<string, unknown>>,
+}));
+
+vi.mock('@/lib/firebase/admin', () => ({
+  adminFirestore: mocks.firestore,
+}));
+vi.mock('@/lib/api/auth', () => ({
+  authenticateRequest: mocks.authenticateRequest,
+}));
+
+import { POST as submitOffer } from '@/app/api/negotiations/[negotiationId]/offers/route';
+import { POST as decideNegotiation } from '@/app/api/negotiations/[negotiationId]/decision/route';
+
+const context = { params: Promise.resolve({ negotiationId: 'negotiation-1' }) };
+const decisionUrl = 'https://example.test/api/negotiations/negotiation-1/decision';
+const offerUrl = 'https://example.test/api/negotiations/negotiation-1/offers';
+let transaction!: TestTransaction;
+
+function request(url: string, body: unknown) {
+  return new Request(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+}
+
+function reference(kind: string, id = `${kind}-generated`): TestReference {
+  return {
+    kind,
+    id,
+    collection: (name) => ({
+      doc: (nestedId) => reference(`${kind}/${id}/${name}`, nestedId),
+    }),
+  };
+}
+
+describe('negotiation state transitions', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.negotiationData = {
+      initiatorAgentId: 'agent-1',
+      recipientAgentId: 'agent-2',
+      initiatorMandateId: 'mandate-1',
+      recipientMandateId: null,
+      title: 'Billing integration',
+      status: 'offer_submitted',
+      expiresAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000),
+      currentOfferId: 'offer-1',
+      currentOffer: {
+        sequence: 1,
+        submittedByAgentId: 'agent-1',
+        mandateId: 'mandate-1',
+        terms: {
+          title: 'API integration',
+          category: 'software',
+          description: 'Build and document the billing service integration.',
+          amountMinor: 12_000,
+          currency: 'USD',
+          deliveryDays: 14,
+        },
+        createdAt: new Date(),
+      },
+      offerCount: 1,
+      eventCount: 2,
+    };
+    mocks.otherNegotiationData = {
+      ...mocks.negotiationData,
+      title: 'Second negotiation',
+      currentOffer: {
+        ...mocks.negotiationData.currentOffer,
+        terms: {
+          ...mocks.negotiationData.currentOffer.terms,
+          amountMinor: 9_000,
+        },
+      },
+    };
+    mocks.mandates = {
+      'mandate-1': {
+        authorizedAgentId: 'agent-1',
+        status: 'active',
+        startsAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        spendingLimitMinor: 20_000,
+        spentAmountMinor: 0,
+        reservedAmountMinor: 0,
+        currency: 'USD',
+        allowedOperations: ['contract.amend'],
+        executionConditions: {
+          maximumOperationAmountMinor: 15_000,
+          requiredDescriptionTerms: [],
+        },
+        approvalRequirements: { ownerApprovalOperations: [] },
+      },
+      'mandate-2': {
+        authorizedAgentId: 'agent-2',
+        status: 'active',
+        startsAt: new Date(Date.now() - 24 * 60 * 60 * 1000),
+        expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000),
+        spendingLimitMinor: 20_000,
+        spentAmountMinor: 0,
+        reservedAmountMinor: 0,
+        currency: 'USD',
+        allowedOperations: ['contract.amend'],
+        executionConditions: {
+          maximumOperationAmountMinor: 15_000,
+          requiredDescriptionTerms: [],
+        },
+        approvalRequirements: { ownerApprovalOperations: [] },
+      },
+    };
+    mocks.agentData = {
+      'agent-1': { categories: ['software'], supportedCurrencies: ['USD'] },
+      'agent-2': { categories: ['software'], supportedCurrencies: ['USD'] },
+    };
+    mocks.authenticateRequest.mockResolvedValue({
+      authenticated: true,
+      user: { uid: 'agent-2' },
+    });
+    mocks.firestore.collection.mockImplementation((name: string) => ({
+      doc: (id?: string) => reference(name, id),
+    }));
+
+    transaction = {
+      get: vi.fn(async (ref: TestReference) => {
+        const data = ref.kind === 'negotiations'
+          ? ref.id === 'negotiation-2'
+            ? mocks.otherNegotiationData ?? undefined
+            : mocks.negotiationData
+          : ref.kind === 'mandates'
+            ? mocks.mandates[ref.id]
+            : ref.kind === 'agents'
+              ? mocks.agentData[ref.id]
+              : undefined;
+        return {
+          exists: data !== undefined,
+          data: () => data,
+        };
+      }),
+      create: mocks.transaction.create,
+      update: vi.fn((ref: TestReference, changes: Record<string, unknown>) => {
+        if (ref.kind === 'negotiations') {
+          if (ref.id === 'negotiation-2' && mocks.otherNegotiationData) {
+            mocks.otherNegotiationData = { ...mocks.otherNegotiationData, ...changes };
+          } else {
+            mocks.negotiationData = { ...mocks.negotiationData, ...changes };
+          }
+        } else if (ref.kind === 'mandates') {
+          mocks.mandates[ref.id] = { ...mocks.mandates[ref.id], ...changes };
+        }
+        mocks.transaction.update(ref, changes);
+      }),
+    };
+    mocks.firestore.runTransaction.mockImplementation(async (
+      callback: (tx: TestTransaction) => Promise<unknown>,
+    ) => callback(transaction));
+  });
+
+  it('lets the recipient counter once and appends a new immutable offer', async () => {
+    const response = await submitOffer(
+      request(offerUrl, {
+        mandateId: 'mandate-2',
+        terms: {
+          title: 'Revised API integration',
+          category: 'software',
+          description: 'Build and document the billing service integration.',
+          amountMinor: 10_000,
+          currency: 'USD',
+          deliveryDays: 18,
+        },
+      }),
+      context,
+    );
+
+    expect(response.status).toBe(201);
+    expect(mocks.negotiationData).toMatchObject({
+      status: 'counter_offered',
+      recipientMandateId: 'mandate-2',
+      offerCount: 2,
+    });
+    expect(mocks.transaction.create).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'negotiations/negotiation-1/offers' }),
+      expect.objectContaining({ sequence: 2, submittedByAgentId: 'agent-2' }),
+    );
+  });
+
+  it('atomically accepts the latest offer and reserves its value against both mandates', async () => {
+    const response = await decideNegotiation(
+      request(decisionUrl, { decision: 'accept', mandateId: 'mandate-2' }),
+      context,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.negotiationData.status).toBe('accepted');
+    expect(mocks.mandates['mandate-1'].reservedAmountMinor).toBe(12_000);
+    expect(mocks.mandates['mandate-2'].reservedAmountMinor).toBe(12_000);
+    expect(mocks.transaction.create).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'negotiations/negotiation-1/events' }),
+      expect.objectContaining({ type: 'negotiation.accepted' }),
+    );
+  });
+
+  it('rejects concurrent duplicate accepts after the first transaction resolves', async () => {
+    let tail = Promise.resolve();
+    mocks.firestore.runTransaction.mockImplementation(async (
+      callback: (tx: TestTransaction) => Promise<unknown>,
+    ) => {
+      const previous = tail;
+      let release!: () => void;
+      tail = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await previous;
+      try {
+        return await callback(transaction);
+      } finally {
+        release();
+      }
+    });
+
+    const decisions = await Promise.all([
+      decideNegotiation(
+        request(decisionUrl, { decision: 'accept', mandateId: 'mandate-2' }),
+        context,
+      ),
+      decideNegotiation(
+        request(decisionUrl, { decision: 'accept', mandateId: 'mandate-2' }),
+        context,
+      ),
+    ]);
+
+    expect(decisions.map(({ status }) => status).sort()).toEqual([200, 409]);
+    expect(mocks.mandates['mandate-1'].reservedAmountMinor).toBe(12_000);
+    expect(mocks.mandates['mandate-2'].reservedAmountMinor).toBe(12_000);
+  });
+
+  it('serializes competing accepts against the shared mandate reservation', async () => {
+    let tail = Promise.resolve();
+    mocks.firestore.runTransaction.mockImplementation(async (
+      callback: (tx: TestTransaction) => Promise<unknown>,
+    ) => {
+      const previous = tail;
+      let release!: () => void;
+      tail = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await previous;
+      try {
+        return await callback(transaction);
+      } finally {
+        release();
+      }
+    });
+
+    const decisions = await Promise.all([
+      decideNegotiation(
+        request(decisionUrl, { decision: 'accept', mandateId: 'mandate-2' }),
+        context,
+      ),
+      decideNegotiation(
+        request(
+          'https://example.test/api/negotiations/negotiation-2/decision',
+          { decision: 'accept', mandateId: 'mandate-2' },
+        ),
+        { params: Promise.resolve({ negotiationId: 'negotiation-2' }) },
+      ),
+    ]);
+
+    expect(decisions.map(({ status }) => status).sort()).toEqual([200, 409]);
+    expect(mocks.mandates['mandate-1'].reservedAmountMinor).toBe(12_000);
+    expect(mocks.mandates['mandate-2'].reservedAmountMinor).toBe(12_000);
+  });
+
+  it('rejects terms that exceed either party mandate without reserving budget', async () => {
+    mocks.mandates['mandate-2'].spendingLimitMinor = 10_000;
+    const response = await decideNegotiation(
+      request(decisionUrl, { decision: 'accept', mandateId: 'mandate-2' }),
+      context,
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.negotiationData.status).toBe('offer_submitted');
+    expect(mocks.mandates['mandate-1'].reservedAmountMinor).toBe(0);
+    expect(mocks.mandates['mandate-2'].reservedAmountMinor).toBe(0);
+  });
+
+  it('expires stale negotiations and prevents offers from the latest offer author', async () => {
+    mocks.negotiationData.expiresAt = new Date(Date.now() - 1_000);
+    const expired = await decideNegotiation(
+      request(decisionUrl, { decision: 'accept', mandateId: 'mandate-2' }),
+      context,
+    );
+    expect(expired.status).toBe(410);
+    expect(mocks.negotiationData.status).toBe('expired');
+    const eventCount = mocks.negotiationData.eventCount;
+    const duplicateExpiry = await decideNegotiation(
+      request(decisionUrl, { decision: 'accept', mandateId: 'mandate-2' }),
+      context,
+    );
+    expect(duplicateExpiry.status).toBe(409);
+    expect(mocks.negotiationData.eventCount).toBe(eventCount);
+
+    mocks.negotiationData.status = 'offer_submitted';
+    mocks.negotiationData.expiresAt = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+    mocks.authenticateRequest.mockResolvedValue({
+      authenticated: true,
+      user: { uid: 'agent-1' },
+    });
+    const selfAccept = await decideNegotiation(
+      request(decisionUrl, { decision: 'accept' }),
+      context,
+    );
+    expect(selfAccept.status).toBe(409);
+  });
+
+  it('lets only the initiator cancel an open negotiation', async () => {
+    const recipientCancel = await decideNegotiation(
+      request(decisionUrl, { decision: 'cancel' }),
+      context,
+    );
+    expect(recipientCancel.status).toBe(403);
+
+    mocks.authenticateRequest.mockResolvedValue({
+      authenticated: true,
+      user: { uid: 'agent-1' },
+    });
+    const initiatorCancel = await decideNegotiation(
+      request(decisionUrl, { decision: 'cancel' }),
+      context,
+    );
+    expect(initiatorCancel.status).toBe(200);
+    expect(mocks.negotiationData.status).toBe('cancelled');
+  });
+
+  it('allows the recipient to reject with a reason and closes the negotiation', async () => {
+    const response = await decideNegotiation(
+      request(decisionUrl, { decision: 'reject', reason: 'Scope is outside our current plan.' }),
+      context,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.negotiationData).toMatchObject({
+      status: 'rejected',
+      resolvedByAgentId: 'agent-2',
+    });
+  });
+});

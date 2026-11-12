@@ -74,12 +74,18 @@ export function assertExecutionAllowed(
 
   const spendingLimitMinor = data.spendingLimitMinor;
   const spentAmountMinor = data.spentAmountMinor;
+  const reservedAmountMinor = data.reservedAmountMinor ?? 0;
   if (
     typeof spendingLimitMinor !== 'number'
     || typeof spentAmountMinor !== 'number'
-    || amountMinor > spendingLimitMinor - spentAmountMinor
+    || typeof reservedAmountMinor !== 'number'
+    || amountMinor > spendingLimitMinor - spentAmountMinor - reservedAmountMinor
   ) {
-    throw new MandateError(409, 'SPENDING_LIMIT_EXCEEDED', 'Operation exceeds the remaining mandate budget.');
+    throw new MandateError(
+      409,
+      'SPENDING_LIMIT_EXCEEDED',
+      'Operation exceeds the remaining mandate budget after committed and reserved terms.',
+    );
   }
 
   const conditions = data.executionConditions;

@@ -100,4 +100,21 @@ describe('mandate authorization policy', () => {
     expect(() => assertOwner(activeMandate, 'agent-1')).toThrowError(/Only the mandate owner/);
     expect(() => assertOwnerOrAgent(activeMandate, 'stranger')).toThrowError(/not found/);
   });
+
+  it('counts accepted negotiation reservations against later spending', () => {
+    expect(() => assertExecutionAllowed(
+      { ...activeMandate, reservedAmountMinor: 8_000 },
+      'payment.authorize',
+      7_001,
+      'Project Alpha work',
+      now,
+    )).toThrowError(/remaining mandate budget/);
+    expect(assertExecutionAllowed(
+      { ...activeMandate, reservedAmountMinor: 8_000 },
+      'payment.authorize',
+      7_000,
+      'Project Alpha work',
+      now,
+    )).toBe(false);
+  });
 });

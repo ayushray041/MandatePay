@@ -117,6 +117,7 @@ export async function POST(request: Request) {
       description: parsed.data.description,
       spendingLimitMinor: parsed.data.spendingLimitMinor,
       spentAmountMinor: 0,
+      reservedAmountMinor: 0,
       currency: parsed.data.currency,
       startsAt: new Date(parsed.data.startsAt),
       expiresAt: new Date(parsed.data.expiresAt),
