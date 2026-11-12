@@ -8,6 +8,8 @@ export const firestoreCollections = {
   mandateAuthorizations: 'mandateAuthorizations',
   contracts: 'contracts',
   negotiations: 'negotiations',
+  negotiationOffers: 'offers',
+  negotiationEvents: 'events',
   amendments: 'amendments',
   payments: 'payments',
   auditLogs: 'auditLogs',

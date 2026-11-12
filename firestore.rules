@@ -29,6 +29,18 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /negotiations/{negotiationId} {
+      allow read, write: if false;
+
+      match /offers/{offerId} {
+        allow read, write: if false;
+      }
+
+      match /events/{eventId} {
+        allow read, write: if false;
+      }
+    }
+
     match /contracts/{contractId} {
       allow get, list: if signedIn() && resource.data.ownerId == request.auth.uid;
       allow create: if signedIn()
