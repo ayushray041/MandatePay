@@ -24,7 +24,7 @@
 ### Remaining work
 - Run the emulator-backed rules tests under JDK 21.
 - Verify signup/login/profile creation against an authorized Firebase project and deploy `firestore.rules` plus `firestore.indexes.json` to that project.
-- Build the remaining contract-processing, amendment, and payment APIs; planned contracts are documented in [API_CONTRACTS.md](./API_CONTRACTS.md). Agent and negotiation workflows are implemented in Phase 3 below.
+- Payment APIs remain future work. Contracts and amendments are implemented in Phase 4 below.
 
 ## Phase 2: Complete mandate management
 
@@ -71,3 +71,28 @@
 - Accepted budget reservations remain reserved until a later explicit execution/settlement integration consumes or releases them. No release mechanism is implied or fabricated.
 - AI-assisted negotiation, contract processing, amendments, payment execution, and webhook integrations remain separate future work.
 - No live Firebase credentials or external service operations are used for local verification. Deploy the current Firestore rules and indexes to the authorized Firebase project before rollout.
+
+## Phase 4: Contract generation and amendments
+
+### Completed
+- Added strict contract, version, approval, amendment, and audit-event schemas.
+- Added participant-authorized contract generation from accepted negotiations, with the negotiation ID as the unique contract ID. Contract terms snapshot both parties and agents, mandate references, negotiated service and price, payment/delivery conditions, expiry, and termination conditions.
+- Implemented participant review and approval. All required owners and agents must approve before activation; rejection requires a reason and transactionally releases the negotiation's reserved amount.
+- Implemented immutable version history and amendment proposals, comparisons, decisions, and audit events. Final amendment approval rechecks both mandates and atomically applies any reservation delta while creating the next version.
+- Added contract listing/detail/review, version history, amendment review, and comparison interfaces. User-facing terms state that the workflow does not provide legal advice, a digital signature, or payment authorization.
+- Firestore rules deny direct client access to contract roots, versions, amendments, and events. Added API, policy, and rules-test coverage.
+
+### Verification
+- Focused contract model/policy tests: passed — 8 tests.
+- Contract/amendment API tests: passed — 7 tests, including malformed input, unauthorized review, duplicate generation, reservation release, mandate-capacity enforcement, and immutable amendment versions.
+- `npx tsc --noEmit`: passed.
+- `npm run lint`: passed.
+- `npm run build`: passed; `/contracts`, `/contracts/[contractId]`, and `/amendments` were generated.
+- `npm test`: passed — 15 test files passed, 1 skipped; 67 tests passed, 3 skipped.
+- `git diff --check`: passed.
+- `npm run test:rules`: could not start the emulator because the installed Firebase CLI requires JDK 21 or newer. The rules tests remain skipped without `FIRESTORE_EMULATOR_HOST`.
+
+### Scope and remaining work
+- Contract generation records accepted workflow terms; it does not claim legal enforceability, create digital signatures, or authorize/process payment.
+- No live Firebase project operations or rules deployment were performed. Deploy the current rules and indexes to an authorized project before rollout.
+- Payment execution, contract intelligence, and webhook integrations remain future work.

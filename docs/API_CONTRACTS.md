@@ -83,19 +83,42 @@ Acceptance revalidates the latest offer against both active mandates, then reser
 amount against both budgets in the same Firestore transaction. Acceptance records agreement and
 reserves budget only; it does not execute a service, contract, payment, or operation authorization.
 
-### Planned contract, amendment, and payment APIs
+### Contracts and amendments
+
+Contract routes require a verified Firebase ID token. A contract is generated only from an accepted
+negotiation, and its participants are the two mandate owners and authorized agents. Each participant
+must review the contract before it becomes active. These records are server-only in Firestore; all
+reads and transitions enforce participant/approver access in the API.
+
+| Method | Path | Request | Response / notes |
+|--------|------|---------|------------------|
+| GET | `/api/contracts` | – | Lists contracts for the caller, including lifecycle status. |
+| POST | `/api/contracts` | `{ negotiationId }` | Generates one reviewable contract for an accepted negotiation. Uses the negotiation ID as the contract ID to prevent duplicates. |
+| GET | `/api/contracts/:contractId` | – | Participant-only contract, current and prior versions, amendments, and audit events. |
+| POST | `/api/contracts/:contractId/approval` | `{ decision: "approve" \| "reject", reason? }` | Required party review. Rejection requires a reason and releases the negotiation's reservation transactionally. All required approvals activate the contract. |
+| POST | `/api/contracts/:contractId/amendments` | Changed contract terms | Proposes an amendment to an active contract; only one unresolved amendment is allowed. |
+| POST | `/api/contracts/:contractId/amendments/:amendmentId/decision` | `{ decision: "approve" \| "reject", reason? }` | Required party review; final approval revalidates both mandates and creates a new immutable version. Rejection requires a reason. |
+| GET | `/api/amendments` | – | Lists amendments requiring the caller's review. |
+
+Contract terms include parties and agent identities, mandate references, negotiated service, price
+and currency, payment and delivery conditions, expiry, and termination conditions. Payment
+conditions explicitly do not authorize or process payment. The generated document is a record of
+agreed workflow terms, not a legal opinion, enforceable legal instrument, or digital signature.
+Contract versions and audit events are immutable; current status, approvals, and version pointers
+are maintained on the contract record.
+
+Amendments can change service details, amount, payment/delivery conditions, expiry, or termination
+conditions. Final approval checks current party authorization, active mandates, operation rules,
+currency/category, mandate expiry, and capacity after accounting for the existing reservation.
+Any approved amount delta is applied to both mandate reservations in the same transaction that
+creates the next contract version.
+
+### Planned payment APIs
 
 The following routes are documented as future work and are not implemented:
 
 | Method | Path | Planned purpose |
 |--------|------|-----------------|
-| POST | `/api/contracts` | Upload a contract and create its Firestore metadata. |
-| GET | `/api/contracts/:id` | Read contract metadata. |
-| DELETE | `/api/contracts/:id` | Delete a contract and associated storage. |
-| POST | `/api/contracts/:id/process` | Extract and validate contract terms. |
-| GET | `/api/contracts/:id/terms` | Read extracted terms. |
-| GET | `/api/amendments/:id` | Read an amendment. |
-| POST | `/api/amendments/:id/approve` | Approve an amendment. |
 | POST | `/api/payments` | Create a PayPal authorization order. |
 | POST | `/api/payments/:id/capture` | Capture authorized funds. |
 | POST | `/api/payments/:id/void` | Void an uncaptured order. |

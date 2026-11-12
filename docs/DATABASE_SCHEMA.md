@@ -1,8 +1,8 @@
 ## Database Schema (Firestore)
 
 Firestore is the primary data store. Client access is deliberately limited: user profiles may be
-read by their owner and contracts use owner-scoped rules; agents, mandates, authorizations,
-negotiations, and negotiation history are accessed through authenticated server APIs only.
+read by their owner; agents, mandates, authorizations, negotiations, contracts, and their histories
+are accessed through authenticated server APIs only.
 
 | Collection | Document ID | Main fields | Purpose |
 |------------|-------------|-------------|---------|
@@ -14,8 +14,10 @@ negotiations, and negotiation history are accessed through authenticated server 
 | `negotiations` | Auto ID | `initiatorAgentId`, `recipientAgentId`, `initiatorMandateId`, nullable `recipientMandateId`, title, lifecycle status, expiry, current offer snapshot and ID, `offerCount`, `eventCount`, resolution fields, timestamps | Private bilateral negotiation state. The recipient mandate is bound on the recipient's first counteroffer or acceptance. |
 | `negotiations/{id}/offers` | Auto ID | `negotiationId`, sequence, `submittedByAgentId`, `mandateId`, terms, `createdAt` | Append-only offer and counteroffer history. Terms contain title, category, description, amount in integer minor units, currency, and delivery days. |
 | `negotiations/{id}/events` | Auto ID | sequence, event type, `actorAgentId`, optional offer ID and details, `createdAt` | Append-only negotiation lifecycle and activity history. |
-| `contracts` | Auto ID | `ownerId`, `title`, status, optional `originalUrl`, timestamps | Existing owner-scoped contract metadata. Processing and negotiation integration are planned. |
-| `contracts/{id}/contractTerms` | Auto ID | terms object, `validatedAt` | Planned extracted contract terms. |
+| `contracts` | Accepted negotiation ID | `negotiationId`, participant and approver UIDs, mandate IDs, lifecycle status, current version pointer, approvals, active amendment ID, expiry, event count, timestamps | One server-generated contract per accepted negotiation; all participant access is through authorized APIs. |
+| `contracts/{id}/versions` | `v1`, `v2`, ... | `contractId`, version, previous version ID, negotiation ID, optional amendment ID, creator, creation time, complete terms snapshot | Immutable contract documents. Approved amendments create a new version instead of modifying prior terms. |
+| `contracts/{id}/amendments` | Auto ID | base version, complete proposed terms, review status, required approvers, approvals, creator, rejection reason, timestamps | Amendment proposals and party decisions. |
+| `contracts/{id}/events` | Auto ID | sequence, event type, actor UID, optional amendment/version IDs and details, creation time | Append-only contract and amendment audit history. |
 
 Negotiation lifecycle states are `initiated`, `offer_submitted`, `counter_offered`, `accepted`,
 `rejected`, `expired`, and `cancelled`. Accepted amounts are added transactionally to
@@ -31,6 +33,8 @@ capacity and are not an execution or payment record.
 - Contract listing by `ownerId`, ordered by `createdAt`.
 - Agent discovery by category and `updatedAt`.
 - Negotiation inbox queries by `initiatorAgentId` or `recipientAgentId`, ordered by `updatedAt`.
+- Contract participant listing by `participantIds` and `updatedAt`.
+- Amendment reviewer listing by `requiredApproverIds` and `updatedAt`.
 
 ### Security rules
 
@@ -38,10 +42,9 @@ Rules in `firestore.rules`:
 
 - Allow users to read only their own profile; all profile writes go through the authenticated API.
 - Deny direct client reads and writes for agent profiles, mandates, authorizations, negotiations,
-  negotiation offers, and negotiation events. APIs perform identity, participant, and ownership
-  checks because Firebase Admin SDK access bypasses rules.
-- Scope contract reads and writes to the contract owner. Contract terms are owner-readable and
-  server-write-only.
+  negotiation offers/events, contracts, contract versions, amendments, and contract events. APIs
+  perform identity, participant, and ownership checks because Firebase Admin SDK access bypasses
+  rules.
 - Deny all other direct client access by default.
 
 The rules are configured by `firebase.json`. Emulator-backed rules tests require

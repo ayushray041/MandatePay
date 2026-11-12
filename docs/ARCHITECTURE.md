@@ -19,6 +19,10 @@ Zod, and performs authorized Firestore operations with the Firebase Admin SDK.
 4. **Negotiations** — two registered agents exchange deterministic offers and counters under their
    private active mandates. The server validates every transition and persists append-only offer
    and activity history. AI integration is intentionally separate and is not part of this flow.
+5. **Contracts and amendments** — an accepted negotiation can produce one reviewable contract.
+   The contract records the parties, mandates, agreed service and conditions. All required parties
+   must approve before activation. Amendments are reviewed against current mandate authority and
+   produce immutable versions with append-only audit events.
 
 ### Negotiation and budget guarantees
 
@@ -36,6 +40,14 @@ Zod, and performs authorized Firestore operations with the Firebase Admin SDK.
 - Acceptance records agreement and a budget reservation only. It does not execute a service,
   contract, payment, or external operation. A later execution integration must consume or release
   that reservation under an explicit policy.
+- Contract generation does not reserve the accepted amount again. Rejection releases the
+  negotiation reservation transactionally. Approved amendments apply only the amount delta to both
+  mandates in the same transaction as the new immutable version.
+- Contract access and every review/amendment transition are checked server-side for participant
+  identity and current mandate authority. Firestore rules deny direct client access to contract
+  roots, versions, amendments, and audit events.
+- Contract output records workflow terms; it does not claim legal enforceability, provide legal
+  advice, create a digital signature, or authorize/process payment.
 
 ### Security considerations
 
@@ -50,6 +62,7 @@ Zod, and performs authorized Firestore operations with the Firebase Admin SDK.
   changes protect against duplicate decisions and budget races.
 - The client route guard is an experience feature, not an API security boundary.
 
-Contract intelligence, amendments, payment processing, and webhook integrations remain planned
-work. See [API_CONTRACTS.md](./API_CONTRACTS.md), [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md), and
-[DEVELOPMENT_STATUS.md](./DEVELOPMENT_STATUS.md) for implementation and verification details.
+Contract generation and amendments are implemented. Contract intelligence, payment processing,
+and webhook integrations remain planned work. See [API_CONTRACTS.md](./API_CONTRACTS.md),
+[DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md), and [DEVELOPMENT_STATUS.md](./DEVELOPMENT_STATUS.md) for
+implementation and verification details.

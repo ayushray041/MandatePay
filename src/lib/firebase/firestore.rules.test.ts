@@ -5,7 +5,7 @@ import {
   initializeTestEnvironment,
   type RulesTestEnvironment,
 } from '@firebase/rules-unit-testing';
-import { doc, getDoc, serverTimestamp, setDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { afterAll, afterEach, beforeAll, describe, it } from 'vitest';
 
 const emulatorAddress = process.env.FIRESTORE_EMULATOR_HOST;
@@ -58,30 +58,39 @@ describe.skipIf(!emulatorAddress)('Firestore security rules', () => {
     );
   });
 
-  it('enforces contract ownership and denies direct payment access', async () => {
+  it('denies direct contract and payment access to all clients', async () => {
+    await environment.withSecurityRulesDisabled(async (context) => {
+      const db = context.firestore();
+      await setDoc(doc(db, 'contracts/contract-1'), {
+        participantIds: ['alice', 'bob'],
+        status: 'pending_review',
+        currentVersion: 1,
+      });
+      await setDoc(doc(db, 'contracts/contract-1/versions/v1'), {
+        contractId: 'contract-1',
+        version: 1,
+        terms: {},
+      });
+      await setDoc(doc(db, 'contracts/contract-1/amendments/amendment-1'), {
+        contractId: 'contract-1',
+        status: 'pending_review',
+      });
+      await setDoc(doc(db, 'contracts/contract-1/events/event-1'), {
+        sequence: 1,
+        type: 'contract.generated',
+      });
+    });
+
     const aliceDb = environment.authenticatedContext('alice').firestore();
     const bobDb = environment.authenticatedContext('bob').firestore();
-
-    await assertSucceeds(
-      setDoc(doc(aliceDb, 'contracts/contract-1'), {
-        ownerId: 'alice',
-        title: 'Services agreement',
-        status: 'uploaded',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      }),
-    );
-    await assertSucceeds(getDoc(doc(aliceDb, 'contracts/contract-1')));
     await assertFails(getDoc(doc(bobDb, 'contracts/contract-1')));
+    await assertFails(getDoc(doc(aliceDb, 'contracts/contract-1')));
     await assertFails(
-      setDoc(doc(bobDb, 'contracts/contract-2'), {
-        ownerId: 'alice',
-        title: 'Forged owner',
-        status: 'uploaded',
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      }),
+      getDoc(doc(aliceDb, 'contracts/contract-1/versions/v1')),
     );
+    await assertFails(getDoc(doc(aliceDb, 'contracts/contract-1/amendments/amendment-1')));
+    await assertFails(getDoc(doc(aliceDb, 'contracts/contract-1/events/event-1')));
+    await assertFails(setDoc(doc(aliceDb, 'contracts/contract-2'), { participantIds: ['alice'] }));
     await assertFails(getDoc(doc(aliceDb, 'payments/payment-1')));
   });
 
