@@ -17,6 +17,7 @@ export const amendmentStatusSchema = z.enum(amendmentStatuses);
 export const contractPartySchema = z.object({
   userId: z.string().min(1).max(128),
   displayName: z.string().min(1).max(100),
+  role: z.enum(['client', 'freelancer']),
   agentId: z.string().min(1).max(128),
   agentDisplayName: z.string().min(1).max(100),
   mandateId: z.string().min(1).max(128),
@@ -138,6 +139,7 @@ export const contractRecordSchema = z.object({
   activeAmendmentId: z.string().nullable(),
   approvals: z.array(z.string().min(1)),
   rejectionReason: z.string().nullable(),
+  expiresAt: z.string(),
   createdAt: z.string().nullable(),
   updatedAt: z.string().nullable(),
 }).strict();
