@@ -8,9 +8,10 @@ import Link from 'next/link';
 import { ArrowRight, LockKeyhole } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { getAuthErrorMessage } from '@/lib/firebase/auth-errors';
+import { getApiErrorMessage } from '@/lib/api/client-errors';
 
 const schema = z.object({
-  email: z.string().email('Invalid email'),
+  email: z.string().trim().email('Invalid email'),
   password: z.string().min(1, 'Password required'),
 });
 
@@ -54,8 +55,9 @@ export function LoginForm() {
       });
 
       if (!response.ok) {
-        const payload = await response.json();
-        throw new Error(payload.error || 'Authentication failed');
+        throw new Error(
+          await getApiErrorMessage(response, 'Authentication failed'),
+        );
       }
 
       router.push('/dashboard');

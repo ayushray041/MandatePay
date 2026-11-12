@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { ArrowRight, FileCheck2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { getAuthErrorMessage } from '@/lib/firebase/auth-errors';
+import { getApiErrorMessage } from '@/lib/api/client-errors';
 
 const schema = z
   .object({
@@ -70,8 +71,9 @@ export function SignupForm() {
       });
 
       if (!response.ok) {
-        const payload = await response.json();
-        throw new Error(payload.error || 'Profile creation failed');
+        throw new Error(
+          await getApiErrorMessage(response, 'Profile creation failed'),
+        );
       }
 
       router.push('/dashboard');

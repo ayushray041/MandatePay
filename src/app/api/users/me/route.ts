@@ -1,87 +1,91 @@
-import { NextResponse } from 'next/server';
 import { adminFirestore } from '@/lib/firebase/admin';
-import { verifyIdToken } from '@/lib/firebase/verify-token';
 import { getDocumentReference, getServerTimestamp } from '@/lib/firebase/firestore';
 import { profileCreateSchema, profileUpdateSchema } from '@/models/user';
+import { authenticateRequest } from '@/lib/api/auth';
+import { apiError, apiSuccess } from '@/lib/api/responses';
+
+function validationDetails(issues: { path: PropertyKey[]; message: string }[]) {
+  return issues.map((issue) => ({
+    path: issue.path.map(String).join('.'),
+    message: issue.message,
+  }));
+}
 
 export async function GET(request: Request) {
-  const authHeader = request.headers.get('Authorization');
-  const verification = await verifyIdToken(authHeader);
-
-  if (!verification.success) {
-    return NextResponse.json({ error: verification.error }, { status: 401 });
+  const authentication = await authenticateRequest(request);
+  if (!authentication.authenticated) {
+    return authentication.response;
   }
 
-  const uid = verification.uid;
-  if (!uid) {
-    return NextResponse.json({ error: 'Authentication context missing' }, { status: 401 });
-  }
-
+  const { uid } = authentication.user;
   if (!adminFirestore) {
-    return NextResponse.json({ error: 'Firebase Admin SDK is not configured' }, { status: 500 });
+    return apiError(503, 'SERVICE_UNAVAILABLE', 'Profile storage is unavailable.');
   }
 
-  const userRef = getDocumentReference('users', uid);
-  const snapshot = await userRef.get();
+  try {
+    const snapshot = await getDocumentReference('users', uid).get();
+    if (!snapshot.exists) {
+      return apiError(404, 'PROFILE_NOT_FOUND', 'User profile was not found.');
+    }
 
-  if (!snapshot.exists) {
-    return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+    return apiSuccess(snapshot.data());
+  } catch (error: unknown) {
+    console.error('Failed to read Firebase user profile.', error);
+    return apiError(500, 'INTERNAL_ERROR', 'Profile could not be loaded.');
   }
-
-  return NextResponse.json(snapshot.data());
 }
 
 export async function POST(request: Request) {
-  const authHeader = request.headers.get('Authorization');
-  const verification = await verifyIdToken(authHeader);
-
-  if (!verification.success) {
-    return NextResponse.json({ error: verification.error }, { status: 401 });
+  const authentication = await authenticateRequest(request);
+  if (!authentication.authenticated) {
+    return authentication.response;
   }
 
-  const uid = verification.uid;
-  const email = verification.email;
-  if (!uid || !email) {
-    return NextResponse.json({ error: 'Authentication context missing' }, { status: 401 });
+  const { uid, email } = authentication.user;
+  if (!email) {
+    return apiError(422, 'EMAIL_REQUIRED', 'A Firebase email address is required.');
   }
 
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    return apiError(400, 'INVALID_JSON', 'Request body must be valid JSON.');
   }
 
   const parsed = profileCreateSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: 'Invalid body', details: parsed.error.issues.map((issue) => issue.message) },
-      { status: 400 },
+    return apiError(
+      400,
+      'INVALID_ARGUMENT',
+      'Profile details are invalid.',
+      validationDetails(parsed.error.issues),
     );
   }
 
   if (!adminFirestore) {
-    return NextResponse.json({ error: 'Firebase Admin SDK is not configured' }, { status: 500 });
+    return apiError(503, 'SERVICE_UNAVAILABLE', 'Profile storage is unavailable.');
   }
-
-  const userRef = getDocumentReference('users', uid);
-  const snapshot = await userRef.get();
-
-  if (snapshot.exists) {
-    return NextResponse.json({ error: 'Profile already exists' }, { status: 400 });
-  }
-
-  const data = {
-    uid,
-    email,
-    displayName: parsed.data.displayName,
-    role: parsed.data.role,
-    createdAt: getServerTimestamp(),
-    updatedAt: getServerTimestamp(),
-  };
 
   try {
+    const userRef = getDocumentReference('users', uid);
+    const snapshot = await userRef.get();
+    if (snapshot.exists) {
+      return apiError(409, 'PROFILE_ALREADY_EXISTS', 'User profile already exists.');
+    }
+
+    const data = {
+      uid,
+      email,
+      displayName: parsed.data.displayName,
+      role: parsed.data.role,
+      createdAt: getServerTimestamp(),
+      updatedAt: getServerTimestamp(),
+    };
+
     await userRef.create(data);
+    const createdProfile = await userRef.get();
+    return apiSuccess(createdProfile.data(), 201);
   } catch (error: unknown) {
     if (
       typeof error === 'object' &&
@@ -89,62 +93,58 @@ export async function POST(request: Request) {
       'code' in error &&
       (error.code === 6 || error.code === 'already-exists')
     ) {
-      return NextResponse.json({ error: 'Profile already exists' }, { status: 409 });
+      return apiError(409, 'PROFILE_ALREADY_EXISTS', 'User profile already exists.');
     }
 
     console.error('Failed to create Firebase user profile.', error);
-    return NextResponse.json({ error: 'Profile could not be created' }, { status: 500 });
+    return apiError(500, 'INTERNAL_ERROR', 'Profile could not be created.');
   }
-
-  const createdProfile = await userRef.get();
-  return NextResponse.json(createdProfile.data(), { status: 201 });
 }
 
 export async function PATCH(request: Request) {
-  const authHeader = request.headers.get('Authorization');
-  const verification = await verifyIdToken(authHeader);
-
-  if (!verification.success) {
-    return NextResponse.json({ error: verification.error }, { status: 401 });
+  const authentication = await authenticateRequest(request);
+  if (!authentication.authenticated) {
+    return authentication.response;
   }
 
-  const uid = verification.uid;
-  if (!uid) {
-    return NextResponse.json({ error: 'Authentication context missing' }, { status: 401 });
-  }
-
+  const { uid } = authentication.user;
   let body: unknown;
   try {
     body = await request.json();
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
+    return apiError(400, 'INVALID_JSON', 'Request body must be valid JSON.');
   }
 
   const parsed = profileUpdateSchema.safeParse(body);
   if (!parsed.success) {
-    return NextResponse.json(
-      { error: 'Invalid body', details: parsed.error.issues.map((issue) => issue.message) },
-      { status: 400 },
+    return apiError(
+      400,
+      'INVALID_ARGUMENT',
+      'Profile update is invalid.',
+      validationDetails(parsed.error.issues),
     );
   }
 
   if (!adminFirestore) {
-    return NextResponse.json({ error: 'Firebase Admin SDK is not configured' }, { status: 500 });
+    return apiError(503, 'SERVICE_UNAVAILABLE', 'Profile storage is unavailable.');
   }
 
-  const userRef = getDocumentReference('users', uid);
-  const snapshot = await userRef.get();
+  try {
+    const userRef = getDocumentReference('users', uid);
+    const snapshot = await userRef.get();
+    if (!snapshot.exists) {
+      return apiError(404, 'PROFILE_NOT_FOUND', 'User profile was not found.');
+    }
 
-  if (!snapshot.exists) {
-    return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+    await userRef.update({
+      ...parsed.data,
+      updatedAt: getServerTimestamp(),
+    });
+
+    const updatedSnapshot = await userRef.get();
+    return apiSuccess(updatedSnapshot.data());
+  } catch (error: unknown) {
+    console.error('Failed to update Firebase user profile.', error);
+    return apiError(500, 'INTERNAL_ERROR', 'Profile could not be updated.');
   }
-
-  const updateData = {
-    ...parsed.data,
-    updatedAt: getServerTimestamp(),
-  };
-
-  await userRef.update(updateData);
-  const updatedSnapshot = await userRef.get();
-  return NextResponse.json(updatedSnapshot.data());
 }

@@ -1,33 +1,33 @@
 import { adminAuth } from '@/lib/firebase/admin';
 
+export type IdTokenVerification =
+  | { success: true; uid: string; email?: string }
+  | { success: false; reason: 'missing' | 'malformed' | 'invalid' | 'unavailable' };
+
 export async function verifyIdToken(
   authHeader: string | null,
-): Promise<{ success: boolean; uid?: string; email?: string; error?: string }> {
+): Promise<IdTokenVerification> {
   if (!authHeader) {
-    return { success: false, error: 'Missing Authorization header' };
+    return { success: false, reason: 'missing' };
   }
 
-  if (!authHeader.startsWith('Bearer ')) {
-    return { success: false, error: 'Malformed Authorization header' };
-  }
-
-  const token = authHeader.slice('Bearer '.length).trim();
-  if (!token) {
-    return { success: false, error: 'Missing bearer token' };
+  const bearerMatch = /^Bearer\s+(\S+)$/i.exec(authHeader.trim());
+  if (!bearerMatch) {
+    return { success: false, reason: 'malformed' };
   }
 
   if (!adminAuth) {
-    return { success: false, error: 'Firebase Admin SDK is not configured' };
+    return { success: false, reason: 'unavailable' };
   }
 
   try {
-    const decoded = await adminAuth.verifyIdToken(token);
+    const decoded = await adminAuth.verifyIdToken(bearerMatch[1], true);
     return {
       success: true,
       uid: decoded.uid,
-      email: decoded.email ?? undefined,
+      email: decoded.email,
     };
   } catch {
-    return { success: false, error: 'Invalid or expired Firebase token' };
+    return { success: false, reason: 'invalid' };
   }
 }

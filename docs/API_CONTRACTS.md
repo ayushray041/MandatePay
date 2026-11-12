@@ -2,11 +2,24 @@
 
 All server‑side endpoints are exposed as **Next.js API routes** under `src/app/api/`. Each route validates request payloads with **Zod** schemas defined in `src/models/` and returns typed JSON responses. Below is a summary of the public contract surface.
 
-### Authentication
+### Authentication and user profiles
+
+Email/password account creation, sign-in, auth-state persistence, and logout use the Firebase
+client SDK. There are no custom `/api/auth/login` or `/api/auth/logout` endpoints. The browser
+sends the current Firebase ID token in an Authorization bearer header when calling protected APIs.
+
 | Method | Path | Request | Response | Notes |
 |--------|------|---------|----------|-------|
-| POST | `/api/auth/login` | `{ email: string, password: string }` | `{ token: string, user: { uid, email, displayName, role } }` | Returns Firebase ID token via Admin SDK. |
-| POST | `/api/auth/logout` | `{ token: string }` | `{ success: true }` | Revokes token on server.
+| GET | `/api/users/me` | – | `{ data: UserProfile }` | Returns only the profile matching the verified token UID. |
+| POST | `/api/users/me` | `{ displayName: string, role?: "client" \| "freelancer" }` | `{ data: UserProfile }` | Provisions the profile after signup; `admin` is not accepted. Defaults role to `client`. |
+| PATCH | `/api/users/me` | `{ displayName: string }` | `{ data: UserProfile }` | Updates only the permitted display name field. |
+| GET | `/api/health/firebase` | – | `{ data: { success: true, firebase, firestore } }` | Public health diagnostic; service failures use the standard error shape. |
+
+`UserProfile` contains `uid`, `email`, `displayName`, `role`, `createdAt`, and `updatedAt`.
+
+The authentication, profile, and health endpoints above are implemented in Phase 1. The
+contract, negotiation, amendment, payment, and webhook entries below describe planned contracts;
+their Route Handlers are not implemented yet.
 
 ### Contracts
 | Method | Path | Request | Response | Notes |
@@ -45,13 +58,18 @@ All server‑side endpoints are exposed as **Next.js API routes** under `src/app
 ### Error Handling
 All endpoints return a consistent error shape:
 ```json
-{ "error": { "code": "string", "message": "string", "details": any } }
+{ "error": { "code": "INVALID_ARGUMENT", "message": "string", "details": [] } }
 ```
-Where `code` matches HTTP status (e.g., `INVALID_ARGUMENT`, `UNAUTHENTICATED`).
+Success responses use `{ "data": ... }`. Error codes are stable semantic identifiers such as
+`INVALID_ARGUMENT`, `UNAUTHENTICATED`, and `SERVICE_UNAVAILABLE`; HTTP status remains the
+authoritative transport status.
 
 ### Webhook Endpoints
 - **PayPal**: `/api/webhooks/paypal` – validates PayPal signatures, updates payment status.
 - **Gemini**: none (Gemini calls are server‑side only).
 
 ---
-*All routes are protected by server‑side authentication middleware that verifies the Firebase ID token and injects `req.user`.*
+Implemented protected Route Handlers verify the Firebase ID token server-side and derive identity
+only from the verified token. The browser route guard is an optimistic UX check and is not an API
+security boundary. Firebase Admin SDK access bypasses Firestore rules, so API handlers must enforce
+ownership themselves.
