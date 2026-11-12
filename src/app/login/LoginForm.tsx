@@ -7,6 +7,7 @@ import { login, getIdToken } from '@/lib/firebase/auth-client';
 import Link from 'next/link';
 import { ArrowRight, LockKeyhole } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { getAuthErrorMessage } from '@/lib/firebase/auth-errors';
 
 const schema = z.object({
   email: z.string().email('Invalid email'),
@@ -59,7 +60,7 @@ export function LoginForm() {
 
       router.push('/dashboard');
     } catch (caughtError: unknown) {
-      setError(caughtError instanceof Error ? caughtError.message : 'Authentication failed');
+      setError(getAuthErrorMessage(caughtError, 'Authentication failed'));
     } finally {
       setLoading(false);
     }

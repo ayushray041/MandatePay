@@ -4,6 +4,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Menu, X } from 'lucide-react';
 import { useState } from 'react';
+import { useAuth } from '@/components/providers/AuthProvider';
+import { getAuthErrorMessage } from '@/lib/firebase/auth-errors';
 
 const links = [
   { href: '/dashboard', label: 'Dashboard' },
@@ -16,7 +18,22 @@ const links = [
 
 export const Header: React.FC = () => {
   const [open, setOpen] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
+  const [loggingOut, setLoggingOut] = useState(false);
   const pathname = usePathname();
+  const { user, logout } = useAuth();
+
+  const handleLogout = async () => {
+    setLoggingOut(true);
+    setLogoutError(null);
+    try {
+      await logout();
+    } catch (error: unknown) {
+      setLogoutError(getAuthErrorMessage(error, 'Unable to sign out.'));
+    } finally {
+      setLoggingOut(false);
+    }
+  };
 
   return (
     <header className="relative z-20 border-b border-mp-warm-grey bg-mp-surface">
@@ -30,18 +47,36 @@ export const Header: React.FC = () => {
         </Link>
 
         <div className="hidden items-center gap-5 sm:flex">
-          <Link
-            href="/login"
-            className="text-sm font-medium text-mp-medium-grey hover:text-mp-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-mp-orange"
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/signup"
-            className="inline-flex min-h-10 items-center justify-center bg-mp-orange px-4 text-sm font-semibold text-mp-ink transition-colors hover:bg-mp-app-bg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mp-orange"
-          >
-            Create account
-          </Link>
+          {user ? (
+            <>
+              <span className="max-w-48 truncate text-sm text-mp-medium-grey">
+                {user.displayName || user.email}
+              </span>
+              <button
+                type="button"
+                onClick={handleLogout}
+                disabled={loggingOut}
+                className="text-sm font-medium text-mp-medium-grey hover:text-mp-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-mp-orange disabled:opacity-60"
+              >
+                {loggingOut ? 'Signing out…' : 'Sign out'}
+              </button>
+            </>
+          ) : (
+            <>
+              <Link
+                href="/login"
+                className="text-sm font-medium text-mp-medium-grey hover:text-mp-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-mp-orange"
+              >
+                Sign in
+              </Link>
+              <Link
+                href="/signup"
+                className="inline-flex min-h-10 items-center justify-center bg-mp-orange px-4 text-sm font-semibold text-mp-ink transition-colors hover:bg-mp-app-bg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mp-orange"
+              >
+                Create account
+              </Link>
+            </>
+          )}
         </div>
 
         <button
@@ -82,18 +117,36 @@ export const Header: React.FC = () => {
             );
           })}
           <div className="mt-3 flex gap-3 border-t border-mp-warm-grey pt-3 sm:hidden">
-            <Link href="/login" onClick={() => setOpen(false)} className="px-3 py-2 text-sm font-medium">
-              Sign in
-            </Link>
-            <Link
-              href="/signup"
-              onClick={() => setOpen(false)}
-              className="bg-mp-orange px-3 py-2 text-sm font-semibold text-mp-ink"
-            >
-              Create account
-            </Link>
+            {user ? (
+              <button
+                type="button"
+                onClick={handleLogout}
+                disabled={loggingOut}
+                className="px-3 py-2 text-sm font-medium disabled:opacity-60"
+              >
+                {loggingOut ? 'Signing out…' : 'Sign out'}
+              </button>
+            ) : (
+              <>
+                <Link href="/login" onClick={() => setOpen(false)} className="px-3 py-2 text-sm font-medium">
+                  Sign in
+                </Link>
+                <Link
+                  href="/signup"
+                  onClick={() => setOpen(false)}
+                  className="bg-mp-orange px-3 py-2 text-sm font-semibold text-mp-ink"
+                >
+                  Create account
+                </Link>
+              </>
+            )}
           </div>
       </nav>
+      {logoutError && (
+        <p className="border-t border-mp-warm-grey px-4 py-2 text-sm text-mp-ink sm:text-right" role="alert">
+          {logoutError}
+        </p>
+      )}
     </header>
   );
 };

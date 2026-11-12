@@ -10,6 +10,7 @@ import {
 import {
   onAuthStateChanged,
   getIdToken,
+  initializeAuthPersistence,
   logout as firebaseLogout,
 } from '@/lib/firebase/auth-client';
 import { firebaseApp } from '@/lib/firebase/client';
@@ -18,6 +19,7 @@ import type { User } from 'firebase/auth';
 interface AuthContextProps {
   user: User | null;
   loading: boolean;
+  error: string | null;
   logout: () => Promise<void>;
   getIdToken: (forceRefresh?: boolean) => Promise<string | null>;
 }
@@ -27,19 +29,42 @@ const AuthContext = createContext<AuthContextProps | undefined>(undefined);
 export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(Boolean(firebaseApp));
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !firebaseApp) {
       return;
     }
 
-    const unsubscribe = onAuthStateChanged((nextUser) => {
-      setUser(nextUser);
-      setLoading(false);
-    });
+    let active = true;
+    let unsubscribe: (() => void) | undefined;
+
+    void initializeAuthPersistence()
+      .then(() => {
+        if (!active) {
+          return;
+        }
+
+        unsubscribe = onAuthStateChanged((nextUser) => {
+          setUser(nextUser);
+          setError(null);
+          setLoading(false);
+        });
+      })
+      .catch((caughtError: unknown) => {
+        if (active) {
+          setError(
+            caughtError instanceof Error
+              ? caughtError.message
+              : 'Unable to initialize Firebase Authentication.',
+          );
+          setLoading(false);
+        }
+      });
 
     return () => {
-      unsubscribe();
+      active = false;
+      unsubscribe?.();
     };
   }, []);
 
@@ -53,6 +78,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const contextValue: AuthContextProps = {
     user,
     loading,
+    error,
     logout: handleLogout,
     getIdToken: fetchIdToken,
   };

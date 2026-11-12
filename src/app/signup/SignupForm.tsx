@@ -7,6 +7,7 @@ import { register, getIdToken } from '@/lib/firebase/auth-client';
 import Link from 'next/link';
 import { ArrowRight, FileCheck2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
+import { getAuthErrorMessage } from '@/lib/firebase/auth-errors';
 
 const schema = z
   .object({
@@ -70,7 +71,7 @@ export function SignupForm() {
 
       router.push('/dashboard');
     } catch (caughtError: unknown) {
-      setError(caughtError instanceof Error ? caughtError.message : 'Profile creation failed');
+      setError(getAuthErrorMessage(caughtError, 'Profile creation failed'));
     } finally {
       setLoading(false);
     }
