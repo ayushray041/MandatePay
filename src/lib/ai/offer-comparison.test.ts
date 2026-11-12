@@ -72,4 +72,28 @@ describe('offer comparison', () => {
       now: new Date('2026-01-01T00:00:00Z'),
     })).rejects.toMatchObject({ code: 'AI_INVALID_OUTPUT' });
   });
+
+  it('surfaces explicit owner approval requirements as deterministic metrics', async () => {
+    const provider: AiProvider = {
+      generateStructured: vi.fn().mockRejectedValue(
+        new AiProviderError('AI_NOT_CONFIGURED', 'Provider unavailable.'),
+      ),
+    };
+    const result = await compareNegotiationOffers(provider, {
+      offers: [{
+        ...offers[0],
+        mandate: {
+          ...mandate,
+          approvalRequirements: { ownerApprovalOperations: ['contract.amend'] },
+        },
+      }],
+      agentId: 'agent-a',
+      now: new Date('2026-01-01T00:00:00Z'),
+    });
+
+    expect(result.offers[0]).toMatchObject({
+      mandateAllowed: true,
+      mandateApprovalRequired: true,
+    });
+  });
 });

@@ -18,7 +18,7 @@ Zod, and performs authorized Firestore operations with the Firebase Admin SDK.
    capability, category, currency, and availability data. Discovery omits email and mandate data.
 4. **Negotiations** — two registered agents exchange deterministic offers and counters under their
    private active mandates. The server validates every transition and persists append-only offer
-   and activity history. AI integration is intentionally separate and is not part of this flow.
+   and activity history. AI assistance is a separate, participant-authorized advisory layer.
 5. **Contracts and amendments** — an accepted negotiation can produce one reviewable contract.
    The contract records the parties, mandates, agreed service and conditions. All required parties
    must approve before activation. Amendments are reviewed against current mandate authority and
@@ -28,6 +28,10 @@ Zod, and performs authorized Firestore operations with the Firebase Admin SDK.
    manage authorization, capture, cancellation, and full-refund transitions. Verified provider
    webhooks reconcile payment state and mandate ledgers transactionally; durable event receipts
    prevent duplicate processing.
+7. **Negotiation intelligence** — a server-only Gemini provider supports recommendations, offer
+   commentary, history summaries, and contract-clause review. Responses are strict-Zod validated;
+   offer suggestions are independently checked against the requesting agent's mandate. No model
+   tools, payment APIs, mandate mutation APIs, or approval actions are available to the provider.
 
 ### Negotiation and budget guarantees
 
@@ -53,6 +57,13 @@ Zod, and performs authorized Firestore operations with the Firebase Admin SDK.
   roots, versions, amendments, and audit events.
 - Contract output records workflow terms; it does not claim legal enforceability, provide legal
   advice, create a digital signature, or authorize/process payment.
+- AI context includes only the negotiation/contract terms needed for the requested analysis.
+  Identifiers and party profiles are omitted; external text is treated as untrusted data and is
+  never inserted into system instructions. Contract-analysis excerpts must match the current
+  immutable version, and its disclaimer is fixed by the server.
+- AI is advisory only. Mandate and state checks remain deterministic, approval requirements are
+  surfaced, and no AI response is persisted or applied automatically. Provider outages never result
+  in invented model output; safe deterministic metrics remain labeled as such.
 - Payment initiation consumes the existing accepted-contract reservation; it does not reserve the
   amount a second time. Capture transactionally consumes both reservations and adds spending to
   the payer mandate only after PayPal confirms completion. Cancellation releases both reservations
@@ -83,12 +94,16 @@ Zod, and performs authorized Firestore operations with the Firebase Admin SDK.
   authorization, negotiation, offer, and event records.
 - All API input is validated with strict Zod schemas before business logic. Transactional state
   changes protect against duplicate decisions and budget races.
+- AI endpoints independently authenticate and authorize negotiation or contract participants.
+  Provider keys stay server-side; structured logs exclude prompts, model output, IDs, and commercial
+  text. Calls have a timeout and bounded output; untrusted text is sent without tools or execution
+  authority.
 - PayPal mode is fixed to sandbox in the server adapter; client credentials, webhook verification,
   and provider calls are never exposed to the browser. The project has not performed real or
   credential-backed financial transactions.
 - The client route guard is an experience feature, not an API security boundary.
 
-Contract generation, amendments, and sandbox payment processing are implemented. Contract
-intelligence remains separate future work. See [API_CONTRACTS.md](./API_CONTRACTS.md),
+Contract generation, amendments, sandbox payment processing, and advisory negotiation intelligence
+are implemented. See [API_CONTRACTS.md](./API_CONTRACTS.md),
 [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md), and [DEVELOPMENT_STATUS.md](./DEVELOPMENT_STATUS.md) for
 implementation and verification details.

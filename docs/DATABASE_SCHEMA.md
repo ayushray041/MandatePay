@@ -27,6 +27,9 @@ Negotiation lifecycle states are `initiated`, `offer_submitted`, `counter_offere
 `reservedAmountMinor` on both participant mandates. Reserved amounts reduce available mandate
 capacity and are not an execution or payment record.
 
+Negotiation intelligence and contract analysis are stateless: requests use existing participant and
+contract-version records, and prompts/model responses are not persisted in Firestore.
+
 ### Indexes
 
 `firestore.indexes.json` defines the composite indexes used for:

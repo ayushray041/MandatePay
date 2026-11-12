@@ -76,6 +76,27 @@ describe('negotiation recommendations', () => {
     expect(result.recommendation?.recommendations).toEqual([]);
   });
 
+  it('does not recommend acceptance when explicit owner approval is required', async () => {
+    const result = await recommendNegotiation(providerWith({
+      summary: 'The current price is within range.',
+      recommendations: [{ action: 'accept', rationale: 'The price is attractive.' }],
+      counteroffer: null,
+      caveats: [],
+    }), {
+      ...input,
+      mandate: {
+        ...mandate,
+        approvalRequirements: { ownerApprovalOperations: ['contract.amend'] },
+      },
+    });
+
+    expect(result.mandateAssessment).toMatchObject({
+      allowed: true,
+      requiresApproval: true,
+    });
+    expect(result.recommendation?.recommendations).toEqual([]);
+  });
+
   it('reports provider outages without presenting invented model output', async () => {
     const provider: AiProvider = {
       generateStructured: vi.fn().mockRejectedValue(

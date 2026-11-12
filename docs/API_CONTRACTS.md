@@ -83,6 +83,21 @@ Acceptance revalidates the latest offer against both active mandates, then reser
 amount against both budgets in the same Firestore transaction. Acceptance records agreement and
 reserves budget only; it does not execute a service, contract, payment, or operation authorization.
 
+#### Negotiation intelligence
+
+| Method | Path | Request | Response / notes |
+|--------|------|---------|------------------|
+| POST | `/api/negotiations/:negotiationId/intelligence` | `{ action: "recommend" \| "compare" \| "summarize" }` | Participant-only advisory output. Recommendations include deterministic mandate and approval checks; comparisons include deterministic price, delivery, and mandate metrics. Summaries report included and total event/offer counts and include at most the latest 30 offers and 50 events. |
+| POST | `/api/negotiations/:negotiationId/intelligence` | `{ action: "explain_violation", terms }` | Deterministic explanation of whether proposed terms meet the caller's assigned mandate conditions. |
+
+Recommendations are not decisions: a counteroffer is returned only after deterministic mandate
+validation and is never submitted automatically. Model responses are strict-Zod validated. If Gemini
+is unavailable, deterministic offer metrics remain available with an explicit notice; recommendation
+and summary output is null rather than fabricated. Set server-only `GEMINI_API_KEY`; optional
+`GEMINI_MODEL` defaults to `gemini-2.5-flash`. Provider keys and AI output are not stored in Firestore.
+Contract analysis returns an explicit provider error when unavailable; it does not return a fabricated
+analysis.
+
 ### Contracts and amendments
 
 Contract routes require a verified Firebase ID token. A contract is generated only from an accepted
@@ -99,6 +114,7 @@ reads and transitions enforce participant/approver access in the API.
 | POST | `/api/contracts/:contractId/amendments` | Changed contract terms | Proposes an amendment to an active contract; only one unresolved amendment is allowed. |
 | POST | `/api/contracts/:contractId/amendments/:amendmentId/decision` | `{ decision: "approve" \| "reject", reason? }` | Required party review; final approval revalidates both mandates and creates a new immutable version. Rejection requires a reason. |
 | GET | `/api/amendments` | – | Lists amendments requiring the caller's review. |
+| POST | `/api/contracts/:contractId/analysis` | – | Participant-only, advisory analysis of the current immutable version. Exact excerpts are checked against source clauses; not legal advice. |
 
 Contract terms include parties and agent identities, mandate references, negotiated service, price
 and currency, payment and delivery conditions, expiry, and termination conditions. Payment

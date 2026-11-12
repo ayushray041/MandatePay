@@ -69,7 +69,7 @@
 ### Scope and remaining work
 - Negotiation expiry is recorded on the first attempted mutation after expiry; no scheduled expiry worker is included.
 - Accepted budget reservations remain reserved until a later explicit execution/settlement integration consumes or releases them. No release mechanism is implied or fabricated.
-- AI-assisted negotiation, contract processing, amendments, payment execution, and webhook integrations remain separate future work.
+- AI-assisted negotiation is implemented in Phase 6. Contract processing and amendments are implemented in Phase 4; payment execution and webhooks are implemented in Phase 5.
 - No live Firebase credentials or external service operations are used for local verification. Deploy the current Firestore rules and indexes to the authorized Firebase project before rollout.
 
 ## Phase 4: Contract generation and amendments
@@ -95,7 +95,7 @@
 ### Scope and remaining work
 - Contract generation records accepted workflow terms; it does not claim legal enforceability, create digital signatures, or itself authorize/process payment. Payment execution is a separate Phase 5 system.
 - No live Firebase project operations or rules deployment were performed. Deploy the current rules and indexes to an authorized project before rollout.
-- Contract intelligence remains future work.
+- Advisory contract intelligence is implemented in Phase 6.
 
 ## Phase 5: Secure payment infrastructure
 
@@ -122,3 +122,26 @@
 - Direct client Firestore access remains denied; deploy the current Firestore rules and indexes to the authorized Firebase project.
 - npm reported 24 dependency audit findings during the PayPal SDK installation (19 moderate and 5 high); dependency audit remediation was not part of this phase.
 - Provider-supported receipt presentation is conditional; this integration does not manufacture receipts or guarantee availability.
+
+## Phase 6: AI-powered negotiation intelligence
+
+### Completed
+- Added a server-only Gemini provider abstraction with bounded JSON generation, a 12-second timeout, explicit configuration/provider/output errors, and structured logs that omit prompts, outputs, identities, and commercial content.
+- Added authenticated, participant-only negotiation recommendations, deterministic mandate-violation explanations, and offer comparisons. Suggested counteroffers are validated against the requesting agent's mandate; acceptance advice is withheld when terms violate the mandate or require owner approval. Suggestions are never submitted automatically.
+- Added model-assisted negotiation summaries with explicit offer/event coverage counts. The request includes at most the latest 30 offers and 50 events; the response reports included and total counts so partial history is not presented as complete.
+- Added participant-only current-version contract-clause analysis. Returned excerpts must exactly occur in the analyzed clause, and the server supplies a fixed non-legal-advice disclaimer.
+- Added negotiation and contract UI panels for recommendations, deterministic comparisons, history summaries, mandate checks, and clause analysis, including provider/error states.
+- AI output is not written to Firestore. No provider tools, payment execution, mandate mutation, contract approval, or automatic state changes are exposed to the model.
+
+### Verification
+- `npm test`: passed — 26 test files passed, 1 skipped; 110 tests passed, 3 skipped.
+- `npx tsc --noEmit`: passed.
+- `npm run lint`: passed.
+- `npm run build`: passed; generated the negotiation-intelligence and contract-analysis API routes. Next.js emitted a non-blocking warning that a parent-directory `package-lock.json` is outside the repository.
+- `git diff --check`: passed.
+- Gemini was not called with live credentials; no AI result is represented as live. The skipped emulator-backed rules tests require `FIRESTORE_EMULATOR_HOST` and JDK 21 or newer.
+
+### Scope and remaining work
+- Configure `GEMINI_API_KEY` as a server-only environment variable and perform an authorized provider integration check before rollout. The optional `GEMINI_MODEL` defaults to `gemini-2.5-flash`.
+- Negotiation summaries send only the latest 30 offers and 50 events; coverage is included in the response. No prompt or model output is persisted.
+- The Gemini adapter is not a legal review or source of authority. Contract analysis is an advisory review aid and does not determine legal enforceability.
