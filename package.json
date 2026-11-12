@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@google/genai": "^3.0.0",
+    "@paypal/paypal-server-sdk": "^2.5.0",
     "@paypal/react-paypal-js": "^10.6.1",
     "firebase": "^13.2.0",
     "firebase-admin": "^14.5.0",
