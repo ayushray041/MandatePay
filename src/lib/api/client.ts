@@ -2,7 +2,7 @@
 
 import { z } from 'zod';
 import { getApiErrorMessage } from '@/lib/api/client-errors';
-import { getIdToken } from '@/lib/firebase/auth-client';
+import { getCurrentUserToken } from '@/lib/firebase/auth-client';
 
 export class ApiClientError extends Error {
   constructor(message: string, readonly status: number) {
@@ -17,7 +17,7 @@ export async function authenticatedApiRequest<T extends z.ZodType>(
   init: RequestInit = {},
   fallbackMessage = 'API request failed.',
 ): Promise<z.infer<T>> {
-  const token = await getIdToken();
+  const token = await getCurrentUserToken(true);
   if (!token) {
     throw new ApiClientError('Your sign-in session has expired. Sign in again to continue.', 401);
   }
@@ -33,6 +33,7 @@ export async function authenticatedApiRequest<T extends z.ZodType>(
     headers,
     cache: 'no-store',
   });
+
   if (!response.ok) {
     throw new ApiClientError(
       await getApiErrorMessage(response, fallbackMessage),

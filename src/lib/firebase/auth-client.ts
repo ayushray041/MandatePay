@@ -59,7 +59,7 @@ export function onAuthStateChanged(callback: (user: User | null) => void): () =>
 }
 
 /** Retrieve the Firebase ID token of the current user. */
-export async function getIdToken(forceRefresh = false): Promise<string | null> {
+export async function getCurrentUserToken(forceRefresh = false): Promise<string | null> {
   const auth = getFirebaseAuth();
   const user = auth.currentUser;
 
@@ -68,4 +68,8 @@ export async function getIdToken(forceRefresh = false): Promise<string | null> {
   }
 
   return user.getIdToken(forceRefresh);
+}
+
+export async function getIdToken(forceRefresh = false): Promise<string | null> {
+  return getCurrentUserToken(forceRefresh);
 }

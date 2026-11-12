@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { z } from 'zod';
-import { login, getIdToken } from '@/lib/firebase/auth-client';
+import { login, getCurrentUser } from '@/lib/firebase/auth-client';
 import Link from 'next/link';
 import { ArrowRight, LockKeyhole } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
@@ -41,7 +41,8 @@ export function LoginForm() {
 
     try {
       await login(parsed.data.email, parsed.data.password);
-      const token = await getIdToken(true);
+      const currentUser = getCurrentUser();
+      const token = currentUser ? await currentUser.getIdToken(true) : null;
 
       if (!token) {
         throw new Error('Failed to retrieve ID token');
