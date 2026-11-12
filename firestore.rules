@@ -17,6 +17,10 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /agents/{uid} {
+      allow read, write: if false;
+    }
+
     match /mandates/{mandateId} {
       allow read, write: if false;
     }
