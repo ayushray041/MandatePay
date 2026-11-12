@@ -6,12 +6,6 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function ownsContract(contractId) {
-      return signedIn()
-        && get(/databases/$(database)/documents/contracts/$(contractId)).data.ownerId
-          == request.auth.uid;
-    }
-
     match /users/{uid} {
       allow read: if signedIn() && request.auth.uid == uid;
       allow write: if false;
@@ -42,37 +36,22 @@ service cloud.firestore {
     }
 
     match /contracts/{contractId} {
-      allow get, list: if signedIn() && resource.data.ownerId == request.auth.uid;
-      allow create: if signedIn()
-        && request.resource.data.keys().hasAll([
-          'ownerId', 'title', 'status', 'createdAt', 'updatedAt'
-        ])
-        && request.resource.data.keys().hasOnly([
-          'ownerId', 'title', 'status', 'originalUrl', 'createdAt', 'updatedAt'
-        ])
-        && request.resource.data.ownerId == request.auth.uid
-        && request.resource.data.title is string
-        && request.resource.data.title.size() > 0
-        && request.resource.data.title.size() <= 200
-        && request.resource.data.status == 'uploaded'
-        && request.resource.data.createdAt == request.time
-        && request.resource.data.updatedAt == request.time
-        && (!('originalUrl' in request.resource.data)
-          || request.resource.data.originalUrl is string);
-      allow update: if signedIn()
-        && resource.data.ownerId == request.auth.uid
-        && request.resource.data.ownerId == resource.data.ownerId
-        && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['title', 'updatedAt'])
-        && request.resource.data.title is string
-        && request.resource.data.title.size() > 0
-        && request.resource.data.title.size() <= 200
-        && request.resource.data.updatedAt == request.time;
-      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+      allow read, write: if false;
 
       match /contractTerms/{termsId} {
-        allow read: if ownsContract(contractId);
-        allow write: if false;
+        allow read, write: if false;
+      }
+
+      match /versions/{versionId} {
+        allow read, write: if false;
+      }
+
+      match /amendments/{amendmentId} {
+        allow read, write: if false;
+      }
+
+      match /events/{eventId} {
+        allow read, write: if false;
       }
     }
 

@@ -7,6 +7,9 @@ import {
   contractEventSchema,
   contractRecordSchema,
   contractVersionSchema,
+  amendmentDecisionSchema,
+  amendmentProposeSchema,
+  contractTermsSchema,
   type ContractRecord,
 } from '@/models/contract';
 
@@ -55,5 +58,48 @@ export function decideContract(
     contractRecordSchema,
     { method: 'POST', body: JSON.stringify(input) },
     'Contract review could not be recorded.',
+  );
+}
+
+export function proposeContractAmendment(
+  contractId: string,
+  input: z.infer<typeof amendmentProposeSchema>,
+) {
+  return authenticatedApiRequest(
+    `/api/contracts/${encodeURIComponent(contractId)}/amendments`,
+    contractAmendmentSchema,
+    { method: 'POST', body: JSON.stringify(input) },
+    'Amendment could not be proposed.',
+  );
+}
+
+export function decideContractAmendment(
+  contractId: string,
+  amendmentId: string,
+  input: z.infer<typeof amendmentDecisionSchema>,
+) {
+  return authenticatedApiRequest(
+    `/api/contracts/${encodeURIComponent(contractId)}/amendments/${encodeURIComponent(amendmentId)}/decision`,
+    contractAmendmentSchema,
+    { method: 'POST', body: JSON.stringify(input) },
+    'Amendment review could not be recorded.',
+  );
+}
+
+const amendmentListItemSchema = contractAmendmentSchema.extend({
+  contractStatus: z.string(),
+  contractVersion: z.number().int().positive(),
+  contractTitle: z.string(),
+  baseTerms: contractTermsSchema,
+});
+
+export type AmendmentListItem = z.infer<typeof amendmentListItemSchema>;
+
+export function listAmendments(): Promise<AmendmentListItem[]> {
+  return authenticatedApiRequest(
+    '/api/amendments',
+    z.array(amendmentListItemSchema),
+    {},
+    'Amendments could not be loaded.',
   );
 }

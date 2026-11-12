@@ -91,34 +91,40 @@ export async function POST(request: Request, context: RouteContext) {
       if (
         !firstMandateSnapshot.exists
         || !secondMandateSnapshot.exists
-        || !firstAgentSnapshot.exists
-        || !secondAgentSnapshot.exists
       ) {
-        throw new ContractError(409, 'MANDATE_UNAVAILABLE', 'A contract mandate or agent profile is unavailable.');
+        throw new ContractError(409, 'MANDATE_UNAVAILABLE', 'A contract mandate is unavailable.');
       }
       const firstMandate = firstMandateSnapshot.data();
       const secondMandate = secondMandateSnapshot.data();
       const firstAgent = firstAgentSnapshot.data();
       const secondAgent = secondAgentSnapshot.data();
-      if (!firstMandate || !secondMandate || !firstAgent || !secondAgent) {
-        throw new Error('Contract authorization data is incomplete.');
+      if (!firstMandate || !secondMandate) {
+        throw new Error('Contract mandate data is incomplete.');
       }
-      assertContractTermsAuthorized(
-        [firstMandate, secondMandate] as [StoredData, StoredData],
-        [firstAgent, secondAgent] as [StoredData, StoredData],
-        [parties[0].agentId, parties[1].agentId],
-        termsResult.data,
-        termsResult.data.amountMinor,
-        'contract.create',
-        now,
-      );
-
       const eventCount = Number(contract.eventCount ?? 0);
       if (!Number.isSafeInteger(eventCount) || eventCount < 1) {
         throw new ContractError(500, 'INVALID_CONTRACT', 'Contract event sequence is invalid.');
       }
       const timestamp = getServerTimestamp();
       if (parsed.data.decision === 'reject') {
+        const firstReserved = Number(firstMandate.reservedAmountMinor ?? 0);
+        const secondReserved = Number(secondMandate.reservedAmountMinor ?? 0);
+        if (
+          !Number.isSafeInteger(firstReserved)
+          || !Number.isSafeInteger(secondReserved)
+          || firstReserved < termsResult.data.amountMinor
+          || secondReserved < termsResult.data.amountMinor
+        ) {
+          throw new ContractError(409, 'INVALID_RESERVATION', 'The accepted negotiation reservation is unavailable.');
+        }
+        transaction.update(firestore.collection('mandates').doc(String(mandateIds[0])), {
+          reservedAmountMinor: firstReserved - termsResult.data.amountMinor,
+          updatedAt: timestamp,
+        });
+        transaction.update(firestore.collection('mandates').doc(String(mandateIds[1])), {
+          reservedAmountMinor: secondReserved - termsResult.data.amountMinor,
+          updatedAt: timestamp,
+        });
         transaction.update(contractRef, {
           status: 'rejected',
           rejectionReason: parsed.data.reason,
@@ -140,6 +146,18 @@ export async function POST(request: Request, context: RouteContext) {
         };
       }
 
+      if (!firstAgent || !secondAgent) {
+        throw new ContractError(409, 'AGENT_UNAVAILABLE', 'A contract agent profile is unavailable.');
+      }
+      assertContractTermsAuthorized(
+        [firstMandate, secondMandate] as [StoredData, StoredData],
+        [firstAgent, secondAgent] as [StoredData, StoredData],
+        [parties[0].agentId, parties[1].agentId],
+        termsResult.data,
+        termsResult.data.amountMinor,
+        'contract.create',
+        now,
+      );
       const nextApprovals = [...approvals, uid];
       const activated = requiredApproverIds.every((approverId) => nextApprovals.includes(approverId));
       transaction.update(contractRef, {

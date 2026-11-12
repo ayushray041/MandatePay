@@ -5,8 +5,23 @@ import { useEffect, useState } from 'react';
 import { ArrowLeft, Check, Clock3, FileText, X } from 'lucide-react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { Button } from '@/components/ui/Button';
-import { decideContract, getContract, type ContractDetail as ContractDetailData } from '@/lib/contracts/client';
-import { formatMinorAmount } from '@/lib/mandates/money';
+import {
+  decideContract,
+  decideContractAmendment,
+  getContract,
+  proposeContractAmendment,
+  type ContractDetail as ContractDetailData,
+} from '@/lib/contracts/client';
+import { currencyFractionDigits, formatMinorAmount, parseMajorAmount } from '@/lib/mandates/money';
+import { agentCategories, agentCategorySchema } from '@/models/agent';
+import { amendmentProposeSchema } from '@/models/contract';
+
+function dateTimeLocalValue(value: string): string {
+  const date = new Date(value);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000)
+    .toISOString()
+    .slice(0, 16);
+}
 
 const eventLabels: Record<string, string> = {
   'contract.generated': 'Contract generated',
@@ -81,6 +96,92 @@ export function ContractDetail({ contractId }: { contractId: string }) {
     await decide('reject', reason);
   };
 
+  const proposeAmendment = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!terms || contract.status !== 'active') {
+      return;
+    }
+    const formData = new FormData(event.currentTarget);
+    const amountMinor = parseMajorAmount(
+      String(formData.get('amount') ?? ''),
+      terms.currency,
+    );
+    const category = agentCategorySchema.safeParse(formData.get('category'));
+    const expiresAt = new Date(String(formData.get('expiresAt') ?? ''));
+    if (amountMinor === null || !category.success) {
+      setError('Enter an amount using the contract currency precision and choose a valid category.');
+      return;
+    }
+    if (Number.isNaN(expiresAt.getTime())) {
+      setError('Choose a valid contract expiry date.');
+      return;
+    }
+    const parsed = amendmentProposeSchema.safeParse({
+      amountMinor,
+      service: {
+        title: String(formData.get('serviceTitle') ?? ''),
+        category: category.data,
+        description: String(formData.get('serviceDescription') ?? ''),
+        deliveryDays: Number(formData.get('deliveryDays')),
+      },
+      paymentConditions: String(formData.get('paymentConditions') ?? ''),
+      deliveryConditions: String(formData.get('deliveryConditions') ?? ''),
+      expiresAt: expiresAt.toISOString(),
+      terminationConditions: String(formData.get('terminationConditions') ?? ''),
+    });
+    if (!parsed.success) {
+      setError(parsed.error.issues[0]?.message ?? 'Review the proposed amendment details.');
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await proposeContractAmendment(contractId, parsed.data);
+      setNotice('Amendment proposed. The current contract version remains unchanged until all parties approve.');
+      setRefreshKey((key) => key + 1);
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : 'Amendment could not be proposed.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const decideAmendment = async (
+    amendmentId: string,
+    decision: 'approve' | 'reject',
+    reason?: string,
+  ) => {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await decideContractAmendment(contractId, amendmentId, {
+        decision,
+        ...(reason ? { reason } : {}),
+      });
+      setNotice(decision === 'approve' ? 'Amendment approval recorded.' : 'Amendment rejected.');
+      setRefreshKey((key) => key + 1);
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : 'Amendment decision could not be recorded.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const rejectAmendment = async (
+    event: React.FormEvent<HTMLFormElement>,
+    amendmentId: string,
+  ) => {
+    event.preventDefault();
+    const reason = String(new FormData(event.currentTarget).get('reason') ?? '').trim();
+    if (!reason) {
+      setError('Provide a reason before rejecting this amendment.');
+      return;
+    }
+    await decideAmendment(amendmentId, 'reject', reason);
+  };
+
   if (loading) {
     return <p className="py-12 text-center text-sm text-mp-medium-grey" role="status">Loading contract…</p>;
   }
@@ -98,13 +199,16 @@ export function ContractDetail({ contractId }: { contractId: string }) {
     );
   }
 
-  const { contract, versions, events } = detail;
+  const { contract, versions, events, amendments } = detail;
   const version = versions.find((item) => item.id === contract.currentVersionId);
   const terms = version?.terms;
   const canReview = contract.status === 'pending_review'
     && Boolean(user?.uid)
     && contract.requiredApproverIds.includes(user?.uid ?? '')
     && !contract.approvals.includes(user?.uid ?? '');
+  const canProposeAmendment = contract.status === 'active'
+    && !contract.activeAmendmentId
+    && Boolean(terms);
 
   return (
     <section className="mp-page mx-auto w-full max-w-6xl space-y-8">
@@ -210,6 +314,140 @@ export function ContractDetail({ contractId }: { contractId: string }) {
                 : 'Your account is not an outstanding reviewer.'}
             </p>
           )}
+
+          <section className="space-y-5 border-t border-mp-warm-grey pt-6">
+            <div className="flex flex-wrap items-end justify-between gap-4">
+              <div>
+                <p className="mp-kicker">Version changes</p>
+                <h2 className="mt-1 text-lg font-semibold">Amendments</h2>
+              </div>
+              <Link href="/amendments" className="text-sm font-semibold underline decoration-mp-orange decoration-2 underline-offset-4">
+                Open amendment register
+              </Link>
+            </div>
+            {contract.activeAmendmentId && (() => {
+              const amendment = amendments.find((item) => item.id === contract.activeAmendmentId);
+              if (!amendment) {
+                return <p className="border-l-2 border-mp-orange px-4 py-3 text-sm" role="alert">The pending amendment record is unavailable.</p>;
+              }
+              const baseVersion = versions.find((item) => item.version === amendment.baseVersion);
+              const mayReview = amendment.status === 'pending_review'
+                && amendment.requiredApproverIds.includes(user?.uid ?? '')
+                && !amendment.approvals.includes(user?.uid ?? '');
+              return (
+                <article className="border border-mp-warm-grey bg-mp-surface p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h3 className="font-semibold">Proposed from version {amendment.baseVersion}</h3>
+                    <span className="border border-mp-warm-grey px-2 py-1 text-xs font-semibold uppercase">
+                      {amendment.status.replaceAll('_', ' ')}
+                    </span>
+                  </div>
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    <div>
+                      <p className="mp-kicker">Current</p>
+                      <p className="mt-1 font-semibold">{baseVersion?.terms.service.title ?? 'Unavailable'}</p>
+                      {baseVersion && <p className="mt-1 text-sm">{baseVersion.terms.service.description}</p>}
+                      {baseVersion && <p className="mt-1 text-sm text-mp-medium-grey">{formatMinorAmount(baseVersion.terms.amountMinor, baseVersion.terms.currency)}</p>}
+                    </div>
+                    <div>
+                      <p className="mp-kicker">Proposed</p>
+                      <p className="mt-1 font-semibold">{amendment.proposedTerms.service.title}</p>
+                      <p className="mt-1 text-sm">{amendment.proposedTerms.service.description}</p>
+                      <p className="mt-1 text-sm text-mp-medium-grey">{formatMinorAmount(amendment.proposedTerms.amountMinor, amendment.proposedTerms.currency)}</p>
+                    </div>
+                  </div>
+                  <dl className="mt-4 grid gap-3 border-t border-mp-warm-grey pt-4 sm:grid-cols-2">
+                    <div><dt className="mp-kicker">Payment terms</dt><dd className="mt-1 whitespace-pre-wrap text-sm">{amendment.proposedTerms.paymentConditions}</dd></div>
+                    <div><dt className="mp-kicker">Delivery terms</dt><dd className="mt-1 whitespace-pre-wrap text-sm">{amendment.proposedTerms.deliveryConditions}</dd></div>
+                    <div><dt className="mp-kicker">Expiry</dt><dd className="mt-1 text-sm">{new Date(amendment.proposedTerms.expiresAt).toLocaleString()}</dd></div>
+                    <div><dt className="mp-kicker">Termination terms</dt><dd className="mt-1 whitespace-pre-wrap text-sm">{amendment.proposedTerms.terminationConditions}</dd></div>
+                  </dl>
+                  <p className="mt-3 text-sm text-mp-medium-grey">
+                    {amendment.approvals.length} of {amendment.requiredApproverIds.length} approvals recorded.
+                  </p>
+                  {mayReview && (
+                    <div className="mt-4 flex flex-wrap items-end gap-4">
+                      <Button type="button" disabled={busy} onClick={() => void decideAmendment(amendment.id, 'approve')}>
+                        <Check size={16} aria-hidden="true" /> Approve amendment
+                      </Button>
+                      <form onSubmit={(event) => void rejectAmendment(event, amendment.id)} className="flex flex-wrap items-end gap-2">
+                        <label>
+                          <span className="mp-label">Reason for rejection</span>
+                          <input name="reason" required maxLength={1000} className="mp-input mt-1 min-w-64" />
+                        </label>
+                        <Button type="submit" variant="outline" disabled={busy}>
+                          <X size={16} aria-hidden="true" /> Reject amendment
+                        </Button>
+                      </form>
+                    </div>
+                  )}
+                </article>
+              );
+            })()}
+
+            {canProposeAmendment && terms && (
+              <details className="border border-mp-warm-grey bg-mp-surface p-5">
+                <summary className="cursor-pointer font-semibold">Propose an amendment</summary>
+                <p className="mp-copy mt-2 text-sm">
+                  All required parties must approve. Price or scope changes are checked against both active mandates before a new version can be created.
+                </p>
+                <form onSubmit={(event) => void proposeAmendment(event)} className="mt-4 grid gap-4 sm:grid-cols-2">
+                  <label>
+                    <span className="mp-label">Service title</span>
+                    <input name="serviceTitle" required minLength={3} maxLength={120} defaultValue={terms.service.title} className="mp-input mt-1" />
+                  </label>
+                  <label>
+                    <span className="mp-label">Category</span>
+                    <select name="category" defaultValue={terms.service.category} className="mp-input mt-1">
+                      {agentCategories.map((category) => <option key={category} value={category}>{category}</option>)}
+                    </select>
+                  </label>
+                  <label className="sm:col-span-2">
+                    <span className="mp-label">Service scope</span>
+                    <textarea name="serviceDescription" required minLength={10} maxLength={3000} rows={3} defaultValue={terms.service.description} className="mp-input mt-1" />
+                  </label>
+                  <label>
+                    <span className="mp-label">Price ({terms.currency})</span>
+                    <input
+                      name="amount"
+                      type="number"
+                      min="0"
+                      step={1 / (10 ** currencyFractionDigits(terms.currency))}
+                      required
+                      defaultValue={(terms.amountMinor / 10 ** currencyFractionDigits(terms.currency)).toFixed(currencyFractionDigits(terms.currency))}
+                      className="mp-input mt-1"
+                    />
+                  </label>
+                  <label>
+                    <span className="mp-label">Delivery days</span>
+                    <input name="deliveryDays" type="number" min="1" max="3650" required defaultValue={terms.service.deliveryDays} className="mp-input mt-1" />
+                  </label>
+                  <label>
+                    <span className="mp-label">Payment conditions</span>
+                    <textarea name="paymentConditions" required minLength={1} maxLength={2000} rows={3} defaultValue={terms.paymentConditions} className="mp-input mt-1" />
+                  </label>
+                  <label>
+                    <span className="mp-label">Delivery conditions</span>
+                    <textarea name="deliveryConditions" required minLength={1} maxLength={2000} rows={3} defaultValue={terms.deliveryConditions} className="mp-input mt-1" />
+                  </label>
+                  <label>
+                    <span className="mp-label">Contract record expiry</span>
+                    <input name="expiresAt" type="datetime-local" required defaultValue={dateTimeLocalValue(terms.expiresAt)} className="mp-input mt-1" />
+                    <span className="mt-1 block text-xs text-mp-medium-grey">Cannot extend beyond either party’s active mandate.</span>
+                  </label>
+                  <label className="sm:col-span-2">
+                    <span className="mp-label">Expiry and termination conditions</span>
+                    <textarea name="terminationConditions" required minLength={1} maxLength={2000} rows={3} defaultValue={terms.terminationConditions} className="mp-input mt-1" />
+                  </label>
+                  <div className="sm:col-span-2">
+                    <Button type="submit" disabled={busy}>
+                      {busy ? 'Proposing…' : 'Submit amendment for review'}
+                    </Button>
+                  </div>
+                </form>
+              </details>
+            )}
+          </section>
           {canReview && (
             <div className="mt-4 flex flex-wrap items-end gap-4">
               <Button type="button" disabled={busy} onClick={() => void decide('approve')}>
