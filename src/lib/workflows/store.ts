@@ -1,7 +1,6 @@
 import 'server-only';
 import type { DocumentSnapshot, Firestore, Transaction } from 'firebase-admin/firestore';
 import { getServerTimestamp } from '@/lib/firebase/firestore';
-import { assertDelegatedAgentsRegistered } from '@/lib/mandates/delegation';
 import { timestampToIso } from '@/lib/mandates/format';
 import type { AgentPrincipal } from '@/lib/agents/auth';
 import {

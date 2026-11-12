@@ -98,36 +98,60 @@ export function WorkflowDashboard() {
   }, [user?.uid]);
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    let active = true;
+    void (async () => {
+      try {
+        const [workflowRecords, mandateRecords] = await Promise.all([listWorkflows(), listMandates()]);
+        if (!active) {
+          return;
+        }
+        setWorkflows(workflowRecords);
+        setMandates(mandateRecords);
+        setSelectedWorkflowId((current) => current || workflowRecords[0]?.id || '');
+        setSelectedMandateId((current) => current || mandateRecords.find((mandate) =>
+          mandate.ownerId === user?.uid && mandate.status === 'active')?.id || '');
+      } catch (caughtError: unknown) {
+        if (active) {
+          setError(caughtError instanceof Error ? caughtError.message : 'Workflow data could not be loaded.');
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    })();
+    return () => { active = false; };
+  }, [user?.uid]);
 
   useEffect(() => {
-    let active = true;
     if (!selectedWorkflowId) {
-      setDetails(null);
-      return () => { active = false; };
+      return;
     }
-    void getWorkflow(selectedWorkflowId)
-      .then((workflowDetails) => {
-        if (active) setDetails(workflowDetails);
-      })
-      .catch((caughtError: unknown) => {
+    let active = true;
+    void (async () => {
+      try {
+        const workflowDetails = await getWorkflow(selectedWorkflowId);
+        if (active) {
+          setDetails(workflowDetails);
+        }
+      } catch (caughtError: unknown) {
         if (active) {
           setDetails(null);
           setError(caughtError instanceof Error ? caughtError.message : 'Workflow details could not be loaded.');
         }
-      });
+      }
+    })();
     return () => { active = false; };
   }, [selectedWorkflowId]);
 
   useEffect(() => {
-    let active = true;
     if (!selectedMandateId) {
-      setAgents([]);
-      return () => { active = false; };
+      return;
     }
-    void getWorkflowAgents(selectedMandateId)
-      .then((options) => {
+    let active = true;
+    void (async () => {
+      try {
+        const options = await getWorkflowAgents(selectedMandateId);
         if (active) {
           setAgents(options);
           setDraftTasks((current) => current.map((task) => ({
@@ -135,13 +159,13 @@ export function WorkflowDashboard() {
             assignedAgentId: task.assignedAgentId || options.find((agent) => agent.role === 'authorized')?.agentId || '',
           })));
         }
-      })
-      .catch((caughtError: unknown) => {
+      } catch (caughtError: unknown) {
         if (active) {
           setAgents([]);
           setError(caughtError instanceof Error ? caughtError.message : 'Mandate agents could not be loaded.');
         }
-      });
+      }
+    })();
     return () => { active = false; };
   }, [selectedMandateId]);
 
