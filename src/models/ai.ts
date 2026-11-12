@@ -6,6 +6,7 @@ import {
 export const negotiationIntelligenceRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('recommend') }).strict(),
   z.object({ action: z.literal('compare') }).strict(),
+  z.object({ action: z.literal('summarize') }).strict(),
   z.object({
     action: z.literal('explain_violation'),
     terms: negotiationOfferTermsSchema,
@@ -24,6 +25,7 @@ export const negotiationRecommendationModelSchema = z.object({
 
 export const mandateAssessmentSchema = z.object({
   allowed: z.boolean(),
+  requiresApproval: z.boolean(),
   reasons: z.array(z.object({
     code: z.string().min(1).max(80),
     explanation: z.string().min(1).max(300),
@@ -70,6 +72,7 @@ export const offerComparisonResponseSchema = z.object({
     currency: z.string().length(3),
     deliveryDays: z.number().int().positive(),
     mandateAllowed: z.boolean(),
+    mandateApprovalRequired: z.boolean(),
     mandateReasons: z.array(z.string().max(300)).max(10),
   }).strict()).max(20),
   notice: z.string().nullable(),
@@ -83,8 +86,15 @@ export const negotiationSummaryModelSchema = z.object({
 
 export const negotiationSummaryResponseSchema = z.object({
   action: z.literal('summarize'),
-  source: z.literal('gemini'),
-  summary: negotiationSummaryModelSchema,
+  source: z.enum(['gemini', 'deterministic']),
+  summary: negotiationSummaryModelSchema.nullable(),
+  coverage: z.object({
+    includedOffers: z.number().int().nonnegative(),
+    totalOffers: z.number().int().nonnegative(),
+    includedEvents: z.number().int().nonnegative(),
+    totalEvents: z.number().int().nonnegative(),
+  }).strict(),
+  notice: z.string().nullable(),
 }).strict();
 
 export const contractAnalysisModelSchema = z.object({
@@ -101,17 +111,27 @@ export const contractAnalysisModelSchema = z.object({
     question: z.string().trim().min(1).max(300),
     severity: z.enum(['low', 'medium', 'high']),
   }).strict()).max(12),
-  disclaimer: z.string().trim().min(1).max(300),
 }).strict();
 
 export const contractAnalysisResponseSchema = z.object({
   action: z.literal('analyze'),
   source: z.literal('gemini'),
   analysis: contractAnalysisModelSchema,
+  disclaimer: z.literal('AI-generated review aid only; not legal advice or a determination of enforceability.'),
 }).strict();
+
+export const negotiationIntelligenceResponseSchema = z.discriminatedUnion('action', [
+  negotiationRecommendationResponseSchema,
+  mandateExplanationResponseSchema,
+  offerComparisonResponseSchema,
+  negotiationSummaryResponseSchema,
+]);
+
+export const contractAnalysisRequestSchema = z.object({}).strict();
 
 export type NegotiationIntelligenceRequest = z.infer<typeof negotiationIntelligenceRequestSchema>;
 export type NegotiationRecommendationResponse = z.infer<typeof negotiationRecommendationResponseSchema>;
 export type OfferComparisonResponse = z.infer<typeof offerComparisonResponseSchema>;
 export type NegotiationSummaryResponse = z.infer<typeof negotiationSummaryResponseSchema>;
 export type ContractAnalysisResponse = z.infer<typeof contractAnalysisResponseSchema>;
+export type NegotiationIntelligenceResponse = z.infer<typeof negotiationIntelligenceResponseSchema>;

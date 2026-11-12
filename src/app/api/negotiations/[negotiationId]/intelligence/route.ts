@@ -5,6 +5,7 @@ import { createAiProvider } from '@/lib/ai/gemini';
 import { aiErrorResponse, AiRequestError } from '@/lib/ai/errors';
 import { recommendNegotiation, assessOffer } from '@/lib/ai/negotiation-recommendation';
 import { compareNegotiationOffers } from '@/lib/ai/offer-comparison';
+import { summarizeNegotiationHistory } from '@/lib/ai/negotiation-summary';
 import { assertNegotiationParticipant, isNegotiationExpired, isNegotiationTerminal } from '@/lib/negotiations/policy';
 import { NegotiationError } from '@/lib/negotiations/errors';
 import { negotiationIntelligenceRequestSchema, mandateExplanationResponseSchema } from '@/models/ai';
@@ -38,8 +39,58 @@ export async function POST(request: Request, context: RouteContext) {
       return apiError(404, 'NEGOTIATION_NOT_FOUND', 'Negotiation was not found.');
     }
     const perspective = assertNegotiationParticipant(negotiation, authentication.user.uid);
-    if (isNegotiationTerminal(negotiation.status) || isNegotiationExpired(negotiation, new Date())) {
+    if (
+      parsed.data.action !== 'summarize'
+      && (isNegotiationTerminal(negotiation.status) || isNegotiationExpired(negotiation, new Date()))
+    ) {
       throw new AiRequestError(409, 'NEGOTIATION_CLOSED', 'Intelligence is unavailable for a closed or expired negotiation.');
+    }
+
+    if (parsed.data.action === 'summarize') {
+      const [offersSnapshot, eventsSnapshot] = await Promise.all([
+        negotiationRef.collection('offers').orderBy('sequence', 'asc').limitToLast(30).get(),
+        negotiationRef.collection('events').orderBy('sequence', 'asc').limitToLast(50).get(),
+      ]);
+      const offers = offersSnapshot.docs.map((offerSnapshot) => {
+        const data = offerSnapshot.data();
+        const terms = negotiationOfferTermsSchema.parse(data.terms);
+        const submitterId = String(data.submittedByAgentId);
+        if (![negotiation.initiatorAgentId, negotiation.recipientAgentId].includes(submitterId)) {
+          throw new AiRequestError(500, 'INVALID_NEGOTIATION_HISTORY', 'Negotiation offer history is inconsistent.');
+        }
+        return {
+          sequence: Number(data.sequence),
+          submittedByAgentId: submitterId,
+          terms,
+        };
+      });
+      const events = eventsSnapshot.docs.map((eventSnapshot) => {
+        const data = eventSnapshot.data();
+        const actorId = String(data.actorAgentId);
+        if (![negotiation.initiatorAgentId, negotiation.recipientAgentId].includes(actorId)) {
+          throw new AiRequestError(500, 'INVALID_NEGOTIATION_HISTORY', 'Negotiation event history is inconsistent.');
+        }
+        return {
+          sequence: Number(data.sequence),
+          type: String(data.type),
+          actorId,
+          ...(typeof data.details?.reason === 'string' ? { reason: data.details.reason } : {}),
+        };
+      });
+      const totalOffers = Number(negotiation.offerCount);
+      const totalEvents = Number(negotiation.eventCount);
+      if (!Number.isSafeInteger(totalOffers) || totalOffers < offers.length
+        || !Number.isSafeInteger(totalEvents) || totalEvents < events.length) {
+        throw new AiRequestError(500, 'INVALID_NEGOTIATION_HISTORY', 'Negotiation history counts are inconsistent.');
+      }
+      return apiSuccess(await summarizeNegotiationHistory(createAiProvider(), {
+        offers,
+        events,
+        agentId: authentication.user.uid,
+        status: String(negotiation.status),
+        totalOffers,
+        totalEvents,
+      }));
     }
 
     const ownMandateId = perspective === 'initiator'

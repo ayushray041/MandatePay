@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Ban, Check, Clock3, MessagesSquare, Send, X } from 'lucide-react';
+import { ArrowLeft, Ban, Check, Clock3, MessagesSquare, Send, Sparkles, X } from 'lucide-react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { Button } from '@/components/ui/Button';
 import { getMyAgentProfile } from '@/lib/agents/client';
@@ -12,9 +12,11 @@ import { agentCategorySchema } from '@/models/agent';
 import {
   decideNegotiation,
   getNegotiation,
+  requestNegotiationIntelligence,
   submitNegotiationOffer,
   type NegotiationDetail as NegotiationDetailData,
 } from '@/lib/negotiations/client';
+import type { NegotiationIntelligenceResponse } from '@/models/ai';
 import type { AgentProfile } from '@/models/agent';
 import type { MandateRecord } from '@/models/mandate';
 import type { NegotiationStatus } from '@/models/negotiation';
@@ -51,6 +53,9 @@ export function NegotiationDetail({ negotiationId }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [intelligence, setIntelligence] = useState<NegotiationIntelligenceResponse | null>(null);
+  const [intelligenceBusy, setIntelligenceBusy] = useState(false);
+  const [intelligenceError, setIntelligenceError] = useState<string | null>(null);
 
   const load = useCallback(async (showLoading = true) => {
     if (showLoading) {
@@ -238,6 +243,28 @@ export function NegotiationDetail({ negotiationId }: Props) {
     await decide('reject', reason);
   };
 
+  const runIntelligence = async (
+    input:
+      | { action: 'recommend' | 'compare' | 'summarize' }
+      | { action: 'explain_violation'; terms: NonNullable<typeof currentOffer>['terms'] },
+  ) => {
+    if (!negotiation) {
+      return;
+    }
+    setIntelligenceBusy(true);
+    setIntelligenceError(null);
+    try {
+      setIntelligence(await requestNegotiationIntelligence(negotiation.id, input));
+    } catch (caughtError: unknown) {
+      setIntelligenceError(
+        caughtError instanceof Error ? caughtError.message : 'Negotiation intelligence could not be loaded.',
+      );
+      setIntelligence(null);
+    } finally {
+      setIntelligenceBusy(false);
+    }
+  };
+
   if (loading) {
     return <p className="py-12 text-center text-sm text-mp-medium-grey" role="status">Loading negotiation…</p>;
   }
@@ -351,6 +378,152 @@ export function NegotiationDetail({ negotiationId }: Props) {
           <p className="mp-copy mt-1 text-sm">The initiator can submit service and commercial terms below.</p>
         </div>
       )}
+
+      <section className="space-y-4 border border-mp-warm-grey bg-mp-surface p-5 sm:p-7" aria-labelledby="ai-intelligence-heading">
+        <div className="flex items-center gap-2">
+          <Sparkles size={18} className="text-mp-orange" aria-hidden="true" />
+          <h2 id="ai-intelligence-heading" className="text-lg font-semibold">Negotiation intelligence</h2>
+        </div>
+        <p className="text-sm text-mp-medium-grey">
+          Suggestions are advisory only. Mandate checks are deterministic; nothing is submitted, approved, or executed for you.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {!terminal && (
+            <Button type="button" variant="outline" disabled={intelligenceBusy || !ownMandate} onClick={() => void runIntelligence({ action: 'recommend' })}>
+              {intelligenceBusy ? 'Working…' : 'Get suggestions'}
+            </Button>
+          )}
+          {detail.offers.length > 0 && (
+            <Button type="button" variant="outline" disabled={intelligenceBusy} onClick={() => void runIntelligence({ action: 'compare' })}>
+              Compare offers
+            </Button>
+          )}
+          <Button type="button" variant="outline" disabled={intelligenceBusy} onClick={() => void runIntelligence({ action: 'summarize' })}>
+            Summarize history
+          </Button>
+          {!terminal && currentOffer && ownMandate && (
+            <Button
+              type="button"
+              variant="outline"
+              disabled={intelligenceBusy}
+              onClick={() => void runIntelligence({ action: 'explain_violation', terms: currentOffer.terms })}
+            >
+              Check mandate conditions
+            </Button>
+          )}
+        </div>
+        {intelligenceError && <p className="text-sm text-red-800" role="alert">{intelligenceError}</p>}
+        {intelligence && (
+          <div className="space-y-3 border-t border-mp-warm-grey pt-4" aria-live="polite">
+            {intelligence.action === 'recommend' && (
+              <>
+                <p className="mp-kicker">{intelligence.source === 'gemini' ? 'Model-assisted suggestion' : 'Deterministic status'}</p>
+                {!intelligence.mandateAssessment.allowed && (
+                  <p className="text-sm font-semibold text-red-800">Current offer does not satisfy this mandate.</p>
+                )}
+                {intelligence.mandateAssessment.requiresApproval && (
+                  <p className="text-sm font-semibold text-amber-900">Owner approval is required; this recommendation cannot authorize acceptance.</p>
+                )}
+                {intelligence.mandateAssessment.reasons.map((reason) => (
+                  <p key={reason.code} className="text-sm">{reason.explanation}</p>
+                ))}
+                {intelligence.notice && <p className="text-sm">{intelligence.notice}</p>}
+                {intelligence.recommendation && (
+                  <>
+                    <p className="text-sm">{intelligence.recommendation.summary}</p>
+                    <ul className="list-disc space-y-1 pl-5 text-sm">
+                      {intelligence.recommendation.recommendations.map((item, index) => (
+                        <li key={`${item.action}-${index}`}><strong>{item.action}:</strong> {item.rationale}</li>
+                      ))}
+                    </ul>
+                    {intelligence.recommendation.counteroffer && (
+                      <p className="border-l-2 border-mp-orange pl-3 text-sm">
+                        Suggested counteroffer only: {formatMinorAmount(
+                          intelligence.recommendation.counteroffer.amountMinor,
+                          intelligence.recommendation.counteroffer.currency,
+                        )} · {intelligence.recommendation.counteroffer.deliveryDays} delivery days.
+                        {intelligence.counterofferValidation !== 'valid' && ` Not usable: ${intelligence.counterofferRejectionReason}`}
+                      </p>
+                    )}
+                    {intelligence.recommendation.caveats.map((caveat) => (
+                      <p key={caveat} className="text-xs text-mp-medium-grey">{caveat}</p>
+                    ))}
+                  </>
+                )}
+                {intelligence.counterofferValidation === 'rejected' && intelligence.counterofferRejectionReason && (
+                  <p className="text-sm text-red-800">
+                    Suggested counteroffer was withheld: {intelligence.counterofferRejectionReason}
+                  </p>
+                )}
+              </>
+            )}
+            {intelligence.action === 'explain_violation' && (
+              <>
+                <p className="font-semibold">
+                  {intelligence.mandateAssessment.allowed
+                    ? intelligence.mandateAssessment.requiresApproval
+                      ? 'Terms fit the mandate limits but require explicit owner approval.'
+                      : 'Terms satisfy the checked mandate conditions.'
+                    : 'Terms do not satisfy the checked mandate conditions.'}
+                </p>
+                {intelligence.mandateAssessment.reasons.map((reason) => (
+                  <p key={reason.code} className="text-sm">{reason.explanation}</p>
+                ))}
+              </>
+            )}
+            {intelligence.action === 'compare' && (
+              <>
+                <p className="mp-kicker">{intelligence.source === 'gemini' ? 'Model-assisted comparison' : 'Deterministic comparison'}</p>
+                {intelligence.notice && <p className="text-sm">{intelligence.notice}</p>}
+                {intelligence.comparison && (
+                  <>
+                    <p className="text-sm">{intelligence.comparison.summary}</p>
+                    <ul className="list-disc space-y-1 pl-5 text-sm">
+                      {intelligence.comparison.tradeoffs.map((item) => (
+                        <li key={item.offerSequence}>Offer #{item.offerSequence}: {item.observation}</li>
+                      ))}
+                    </ul>
+                    {intelligence.comparison.questions.map((question) => <p key={question} className="text-sm">{question}</p>)}
+                  </>
+                )}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm">
+                    <thead><tr><th className="py-2 pr-3">Offer</th><th className="py-2 pr-3">Price</th><th className="py-2 pr-3">Delivery</th><th className="py-2">Mandate</th></tr></thead>
+                    <tbody>{intelligence.offers.map((offer) => (
+                      <tr key={offer.sequence} className="border-t border-mp-warm-grey">
+                        <td className="py-2 pr-3">#{offer.sequence} · {offer.perspective === 'you' ? 'You' : 'Other party'}</td>
+                        <td className="py-2 pr-3">{formatMinorAmount(offer.amountMinor, offer.currency)}</td>
+                        <td className="py-2 pr-3">{offer.deliveryDays} days</td>
+                        <td className="py-2">
+                          {offer.mandateAllowed
+                            ? offer.mandateApprovalRequired ? 'Owner approval required' : 'Within checks'
+                            : offer.mandateReasons.join(' ')}
+                        </td>
+                      </tr>
+                    ))}</tbody>
+                  </table>
+                </div>
+              </>
+            )}
+            {intelligence.action === 'summarize' && (
+              <>
+                <p className="mp-kicker">{intelligence.source === 'gemini' ? 'Model-generated history summary' : 'Summary unavailable'}</p>
+                <p className="text-xs text-mp-medium-grey">
+                  Coverage: {intelligence.coverage.includedOffers} of {intelligence.coverage.totalOffers} offers and {intelligence.coverage.includedEvents} of {intelligence.coverage.totalEvents} events.
+                </p>
+                {intelligence.notice && <p className="text-sm">{intelligence.notice}</p>}
+                {intelligence.summary && (
+                  <>
+                    <p className="text-sm">{intelligence.summary.summary}</p>
+                    {intelligence.summary.keyChanges.map((item) => <p key={item} className="text-sm">Change: {item}</p>)}
+                    {intelligence.summary.unresolvedQuestions.map((item) => <p key={item} className="text-sm">Open question: {item}</p>)}
+                  </>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </section>
 
       {canCounter && (
         <section className="border border-mp-warm-grey bg-mp-surface p-5 sm:p-7">

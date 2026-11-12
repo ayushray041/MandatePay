@@ -9,6 +9,10 @@ import {
   type NegotiationOfferTerms,
   type NegotiationRecord,
 } from '@/models/negotiation';
+import {
+  negotiationIntelligenceResponseSchema,
+  type NegotiationIntelligenceResponse,
+} from '@/models/ai';
 
 const negotiationDetailRecordSchema = negotiationRecordSchema.extend({
   initiatorDisplayName: z.string().optional(),
@@ -82,5 +86,22 @@ export async function decideNegotiation(
     negotiationRecordSchema,
     { method: 'POST', body: JSON.stringify(input) },
     'Negotiation decision failed.',
+  );
+}
+
+export function requestNegotiationIntelligence(
+  negotiationId: string,
+  input:
+    | { action: 'recommend' | 'compare' | 'summarize' }
+    | { action: 'explain_violation'; terms: NegotiationOfferTerms },
+): Promise<NegotiationIntelligenceResponse> {
+  return authenticatedApiRequest(
+    `/api/negotiations/${encodeURIComponent(negotiationId)}/intelligence`,
+    negotiationIntelligenceResponseSchema,
+    {
+      method: 'POST',
+      body: JSON.stringify(input),
+    },
+    'Negotiation intelligence could not be loaded.',
   );
 }

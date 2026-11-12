@@ -7,6 +7,7 @@ import {
 } from '@/models/ai';
 import { assertOfferWithinMandate } from '@/lib/negotiations/policy';
 import { NegotiationError } from '@/lib/negotiations/errors';
+import { assertExecutionAllowed } from '@/lib/mandates/policy';
 import type { NegotiationOfferTerms } from '@/models/negotiation';
 
 type StoredData = Record<string, unknown>;
@@ -29,17 +30,35 @@ export function assessOffer(
   agentId: string,
   terms: NegotiationOfferTerms,
   now: Date,
-): { allowed: true; reasons: [] } | {
+): { allowed: true; requiresApproval: boolean; reasons: Array<{ code: string; explanation: string }> } | {
   allowed: false;
+  requiresApproval: false;
   reasons: Array<{ code: string; explanation: string }>;
 } {
   try {
     assertOfferWithinMandate(mandate, agent, agentId, terms, now);
-    return { allowed: true, reasons: [] };
+    const requiresApproval = assertExecutionAllowed(
+      mandate,
+      'contract.amend',
+      terms.amountMinor,
+      `${terms.title} ${terms.description}`,
+      now,
+    );
+    return {
+      allowed: true,
+      requiresApproval,
+      reasons: requiresApproval
+        ? [{
+          code: 'OWNER_APPROVAL_REQUIRED',
+          explanation: 'The mandate requires explicit owner approval for these terms.',
+        }]
+        : [],
+    };
   } catch (error: unknown) {
     if (error instanceof NegotiationError) {
       return {
         allowed: false,
+        requiresApproval: false,
         reasons: [{ code: error.code, explanation: error.message }],
       };
     }
@@ -68,7 +87,7 @@ export async function recommendNegotiation(
 ): Promise<NegotiationRecommendationResponse> {
   const mandateAssessment = input.currentTerms
     ? assessOffer(input.mandate, input.agent, input.agentId, input.currentTerms, input.now)
-    : { allowed: true as const, reasons: [] as [] };
+    : { allowed: true as const, requiresApproval: false, reasons: [] as [] };
 
   let generated: z.infer<typeof negotiationRecommendationModelSchema>;
   try {
@@ -184,7 +203,7 @@ export async function recommendNegotiation(
     }
   }
 
-  if (!mandateAssessment.allowed) {
+  if (!mandateAssessment.allowed || mandateAssessment.requiresApproval) {
     generated = {
       ...generated,
       recommendations: generated.recommendations.filter(({ action }) => action !== 'accept'),

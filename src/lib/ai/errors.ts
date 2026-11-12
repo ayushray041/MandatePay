@@ -1,5 +1,6 @@
 import { apiError } from '@/lib/api/responses';
 import { AiProviderError } from '@/lib/ai/provider';
+import { z } from 'zod';
 
 export class AiRequestError extends Error {
   constructor(
@@ -28,6 +29,10 @@ export function aiErrorResponse(error: unknown): Response {
     event: 'ai.request',
     outcome: 'failure',
     code: 'AI_INTERNAL_ERROR',
+    errorName: error instanceof Error ? error.name : 'UnknownError',
+    ...(error instanceof z.ZodError
+      ? { validationPaths: error.issues.map((issue) => issue.path.join('.')) }
+      : {}),
   }));
   return apiError(500, 'AI_INTERNAL_ERROR', 'Negotiation intelligence could not be completed.');
 }

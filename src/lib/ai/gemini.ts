@@ -10,15 +10,17 @@ const requestTimeoutMs = 12_000;
 
 export class GeminiAiProvider implements AiProvider {
   async generateStructured(input: AiGenerationInput): Promise<unknown> {
+    const startedAt = Date.now();
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {
-      throw new AiProviderError(
+      const error = new AiProviderError(
         'AI_NOT_CONFIGURED',
         'Negotiation intelligence is unavailable because its provider is not configured.',
       );
+      writeAiLog(input.action, 'failure', Date.now() - startedAt, error.code);
+      throw error;
     }
 
-    const startedAt = Date.now();
     try {
       const ai = new GoogleGenAI({ apiKey });
       const response = await ai.models.generateContent({

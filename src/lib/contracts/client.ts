@@ -12,6 +12,10 @@ import {
   contractTermsSchema,
   type ContractRecord,
 } from '@/models/contract';
+import {
+  contractAnalysisResponseSchema,
+  type ContractAnalysisResponse,
+} from '@/models/ai';
 
 const contractDetailSchema = z.object({
   contract: contractRecordSchema,
@@ -37,6 +41,15 @@ export function getContract(contractId: string): Promise<ContractDetail> {
     contractDetailSchema,
     {},
     'Contract details could not be loaded.',
+  );
+}
+
+export function analyzeContract(contractId: string): Promise<ContractAnalysisResponse> {
+  return authenticatedApiRequest(
+    `/api/contracts/${encodeURIComponent(contractId)}/analysis`,
+    contractAnalysisResponseSchema,
+    { method: 'POST' },
+    'Contract analysis could not be completed.',
   );
 }
 

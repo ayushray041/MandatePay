@@ -2,12 +2,13 @@
 
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
-import { ArrowLeft, Check, Clock3, FileText, X } from 'lucide-react';
+import { ArrowLeft, Check, Clock3, FileText, Sparkles, X } from 'lucide-react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { Button } from '@/components/ui/Button';
 import {
   decideContract,
   decideContractAmendment,
+  analyzeContract,
   getContract,
   proposeContractAmendment,
   type ContractDetail as ContractDetailData,
@@ -15,6 +16,7 @@ import {
 import { currencyFractionDigits, formatMinorAmount, parseMajorAmount } from '@/lib/mandates/money';
 import { agentCategories, agentCategorySchema } from '@/models/agent';
 import { amendmentProposeSchema } from '@/models/contract';
+import type { ContractAnalysisResponse } from '@/models/ai';
 
 function dateTimeLocalValue(value: string): string {
   const date = new Date(value);
@@ -43,6 +45,9 @@ export function ContractDetail({ contractId }: { contractId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [analysis, setAnalysis] = useState<ContractAnalysisResponse | null>(null);
+  const [analysisBusy, setAnalysisBusy] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -67,6 +72,19 @@ export function ContractDetail({ contractId }: { contractId: string }) {
       active = false;
     };
   }, [contractId, refreshKey]);
+
+  const runAnalysis = async () => {
+    setAnalysisBusy(true);
+    setAnalysisError(null);
+    setAnalysis(null);
+    try {
+      setAnalysis(await analyzeContract(contractId));
+    } catch (caughtError: unknown) {
+      setAnalysisError(caughtError instanceof Error ? caughtError.message : 'Contract analysis could not be completed.');
+    } finally {
+      setAnalysisBusy(false);
+    }
+  };
 
   const decide = async (
     decision: 'approve' | 'reject',
@@ -239,6 +257,39 @@ export function ContractDetail({ contractId }: { contractId: string }) {
         This is an administrative record of negotiated terms, not legal advice or a digitally signed
         agreement. MandatePay does not execute payments or monitor service delivery.
       </p>
+
+      {terms && (
+        <section className="space-y-4 border border-mp-warm-grey bg-mp-surface p-5 sm:p-7" aria-labelledby="contract-analysis-heading">
+          <div className="flex items-center gap-2">
+            <Sparkles size={18} className="text-mp-orange" aria-hidden="true" />
+            <h2 id="contract-analysis-heading" className="text-lg font-semibold">AI clause review</h2>
+          </div>
+          <p className="text-sm text-mp-medium-grey">
+            Optional review aid for the current immutable version. It does not change the contract or replace professional advice.
+          </p>
+          <Button type="button" variant="outline" disabled={analysisBusy} onClick={() => void runAnalysis()}>
+            {analysisBusy ? 'Reviewing…' : 'Review clauses'}
+          </Button>
+          {analysisError && <p className="text-sm text-red-800" role="alert">{analysisError}</p>}
+          {analysis && (
+            <div className="space-y-3 border-t border-mp-warm-grey pt-4" aria-live="polite">
+              <p className="text-sm">{analysis.analysis.summary}</p>
+              {analysis.analysis.clauses.length === 0 && (
+                <p className="text-sm text-mp-medium-grey">No specific clause observations were returned.</p>
+              )}
+              {analysis.analysis.clauses.map((clause, index) => (
+                <article key={`${clause.field}-${index}`} className="border-l-2 border-mp-orange pl-4">
+                  <p className="mp-kicker">{clause.severity} · {clause.field}</p>
+                  <blockquote className="mt-1 text-sm italic">“{clause.excerpt}”</blockquote>
+                  <p className="mt-1 text-sm">{clause.concern}</p>
+                  <p className="mt-1 text-sm font-medium">Question for review: {clause.question}</p>
+                </article>
+              ))}
+              <p className="border-t border-mp-warm-grey pt-3 text-xs text-mp-medium-grey">{analysis.disclaimer}</p>
+            </div>
+          )}
+        </section>
+      )}
 
       {terms ? (
         <article className="space-y-8 border border-mp-warm-grey bg-white p-6 shadow-sm sm:p-10">
