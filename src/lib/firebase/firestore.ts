@@ -3,6 +3,8 @@ import { adminFirestore } from '@/lib/firebase/admin';
 
 export const firestoreCollections = {
   users: 'users',
+  mandates: 'mandates',
+  mandateAuthorizations: 'mandateAuthorizations',
   contracts: 'contracts',
   negotiations: 'negotiations',
   amendments: 'amendments',

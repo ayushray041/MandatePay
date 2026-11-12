@@ -1,6 +1,22 @@
 {
   "indexes": [
     {
+      "collectionGroup": "mandates",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "ownerId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "mandates",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "authorizedAgentId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "contracts",
       "queryScope": "COLLECTION",
       "fields": [

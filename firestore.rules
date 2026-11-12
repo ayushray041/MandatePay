@@ -17,6 +17,14 @@ service cloud.firestore {
       allow write: if false;
     }
 
+    match /mandates/{mandateId} {
+      allow read, write: if false;
+    }
+
+    match /mandateAuthorizations/{authorizationId} {
+      allow read, write: if false;
+    }
+
     match /contracts/{contractId} {
       allow get, list: if signedIn() && resource.data.ownerId == request.auth.uid;
       allow create: if signedIn()
