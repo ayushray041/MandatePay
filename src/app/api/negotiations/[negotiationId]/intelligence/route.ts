@@ -6,10 +6,14 @@ import { aiErrorResponse, AiRequestError } from '@/lib/ai/errors';
 import { recommendNegotiation, assessOffer } from '@/lib/ai/negotiation-recommendation';
 import { compareNegotiationOffers } from '@/lib/ai/offer-comparison';
 import { summarizeNegotiationHistory } from '@/lib/ai/negotiation-summary';
+import { analyzeNegotiation } from '@/lib/ai/negotiation-analysis';
 import { assertNegotiationParticipant, isNegotiationExpired, isNegotiationTerminal } from '@/lib/negotiations/policy';
 import { NegotiationError } from '@/lib/negotiations/errors';
 import { negotiationIntelligenceRequestSchema, mandateExplanationResponseSchema } from '@/models/ai';
-import { negotiationOfferTermsSchema } from '@/models/negotiation';
+import {
+  negotiationOfferTermsSchema,
+  negotiationStrategyProfileSchema,
+} from '@/models/negotiation';
 import type { NegotiationOfferTerms } from '@/models/negotiation';
 
 type RouteContext = { params: Promise<{ negotiationId: string }> };
@@ -41,6 +45,7 @@ export async function POST(request: Request, context: RouteContext) {
     const perspective = assertNegotiationParticipant(negotiation, authentication.user.uid);
     if (
       parsed.data.action !== 'summarize'
+      && parsed.data.action !== 'analyze'
       && (isNegotiationTerminal(negotiation.status) || isNegotiationExpired(negotiation, new Date()))
     ) {
       throw new AiRequestError(409, 'NEGOTIATION_CLOSED', 'Intelligence is unavailable for a closed or expired negotiation.');
@@ -68,12 +73,13 @@ export async function POST(request: Request, context: RouteContext) {
         const data = eventSnapshot.data();
         const agentActorId = typeof data.actorAgentId === 'string' ? data.actorAgentId : null;
         const ownerActorId = typeof data.actorOwnerId === 'string' ? data.actorOwnerId : null;
-        if ((agentActorId === null) === (ownerActorId === null)) {
+        const systemActorId = typeof data.actorSystemId === 'string' ? data.actorSystemId : null;
+        if ([agentActorId, ownerActorId, systemActorId].filter((actorId) => actorId !== null).length !== 1) {
           throw new AiRequestError(500, 'INVALID_NEGOTIATION_HISTORY', 'Negotiation event actor is invalid.');
         }
         const actorId = agentActorId
-          ?? (ownerActorId ? 'mandate_owner' : '');
-        const validAgentActor = actorId === 'mandate_owner'
+          ?? (ownerActorId ? 'mandate_owner' : systemActorId ? 'system' : '');
+        const validAgentActor = actorId === 'mandate_owner' || actorId === 'system'
           || [negotiation.initiatorAgentId, negotiation.recipientAgentId].includes(actorId);
         const validOwnerActor = ownerActorId === null
           || (Array.isArray(negotiation.requiredOwnerApprovalIds)
@@ -104,6 +110,44 @@ export async function POST(request: Request, context: RouteContext) {
       }));
     }
 
+    if (parsed.data.action === 'analyze') {
+      const [offersSnapshot, strategySnapshot] = await Promise.all([
+        negotiationRef.collection('offers').orderBy('sequence', 'asc').limitToLast(20).get(),
+        firestore.collection('negotiationStrategyProfiles').doc(authentication.user.uid).get(),
+      ]);
+      const offers = offersSnapshot.docs.map((offerSnapshot) => {
+        const data = offerSnapshot.data();
+        const terms = negotiationOfferTermsSchema.parse(data.terms);
+        const submitterId = String(data.submittedByAgentId);
+        if (![negotiation.initiatorAgentId, negotiation.recipientAgentId].includes(submitterId)) {
+          throw new AiRequestError(500, 'INVALID_NEGOTIATION_HISTORY', 'Negotiation offer history is inconsistent.');
+        }
+        return {
+          sequence: Number(data.sequence),
+          submittedByAgentId: submitterId,
+          terms,
+        };
+      });
+      const savedStrategy = strategySnapshot.data();
+      const strategy = savedStrategy
+        ? negotiationStrategyProfileSchema.parse({
+            posture: savedStrategy.posture,
+            priorities: savedStrategy.priorities,
+            concessionStepBasisPoints: savedStrategy.concessionStepBasisPoints,
+          })
+        : negotiationStrategyProfileSchema.parse({
+            posture: 'balanced',
+            priorities: ['price', 'delivery', 'certainty'],
+            concessionStepBasisPoints: 500,
+          });
+      return apiSuccess(await analyzeNegotiation(createAiProvider(), {
+        offers,
+        agentId: authentication.user.uid,
+        strategy,
+        totalOffers: Number(negotiation.offerCount),
+      }));
+    }
+
     const ownMandateId = perspective === 'initiator'
       ? negotiation.initiatorMandateId
       : negotiation.recipientMandateId;
@@ -111,10 +155,13 @@ export async function POST(request: Request, context: RouteContext) {
       throw new AiRequestError(409, 'MANDATE_REQUIRED', 'Select an authorized mandate before requesting a recommendation.');
     }
 
-    const [mandateSnapshot, agentSnapshot, offersSnapshot] = await Promise.all([
+    const [mandateSnapshot, agentSnapshot, offersSnapshot, strategySnapshot] = await Promise.all([
       firestore.collection('mandates').doc(ownMandateId).get(),
       firestore.collection('agents').doc(authentication.user.uid).get(),
       negotiationRef.collection('offers').orderBy('sequence', 'asc').limitToLast(20).get(),
+      parsed.data.action === 'recommend'
+        ? firestore.collection('negotiationStrategyProfiles').doc(authentication.user.uid).get()
+        : Promise.resolve(null),
     ]);
     const mandate = mandateSnapshot.data();
     const agent = agentSnapshot.data();
@@ -179,6 +226,18 @@ export async function POST(request: Request, context: RouteContext) {
     const currentOffer = negotiation.currentOffer
       ? negotiationOfferTermsSchema.parse(negotiation.currentOffer.terms) as NegotiationOfferTerms
       : null;
+    const savedStrategy = strategySnapshot?.data();
+    const strategy = savedStrategy
+      ? negotiationStrategyProfileSchema.parse({
+          posture: savedStrategy.posture,
+          priorities: savedStrategy.priorities,
+          concessionStepBasisPoints: savedStrategy.concessionStepBasisPoints,
+        })
+      : negotiationStrategyProfileSchema.parse({
+          posture: 'balanced',
+          priorities: ['price', 'delivery', 'certainty'],
+          concessionStepBasisPoints: 500,
+        });
     return apiSuccess(await recommendNegotiation(createAiProvider(), {
       mandate,
       agent,
@@ -186,6 +245,7 @@ export async function POST(request: Request, context: RouteContext) {
       currentTerms: currentOffer,
       offers,
       ownMandatePerspective: perspective,
+      strategy,
       now: new Date(),
     }));
   } catch (error: unknown) {

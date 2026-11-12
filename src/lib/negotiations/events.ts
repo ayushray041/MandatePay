@@ -7,8 +7,9 @@ type EventInput = {
   offerId?: string;
   details?: Record<string, unknown>;
 } & (
-  | { actorAgentId: string; actorOwnerId?: never }
-  | { actorOwnerId: string; actorAgentId?: never }
+  | { actorAgentId: string; actorOwnerId?: never; actorSystemId?: never }
+  | { actorOwnerId: string; actorAgentId?: never; actorSystemId?: never }
+  | { actorSystemId: string; actorAgentId?: never; actorOwnerId?: never }
 );
 
 export function writeNegotiationEvent(

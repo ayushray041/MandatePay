@@ -167,21 +167,36 @@ discovery. Each participant's mandate is checked server-side when submitting or 
 
 | Method | Path | Request | Response / notes |
 |--------|------|---------|------------------|
-| POST | `/api/negotiations` | `{ mandateId, recipientAgentId, title, expiresAt }` | `{ data: NegotiationRecord }`; creates an `initiated` request. Expiry must be in the future and within 30 days. |
+| POST | `/api/negotiations` | `{ mandateId, recipientAgentId, title, expiresAt }` or `{ mandateId, recipientAgentIds, title, expiresAt }` | Creates one request or 2–10 independent vendor negotiations in one comparison batch. Each child has its own lifecycle, approval, and reservation. Expiry must be in the future and within 30 days. |
 | GET | `/api/negotiations` | – | `{ data: NegotiationRecord[] }`; lists up to 50 negotiations involving the caller, including owner approvals assigned to the caller. |
-| GET | `/api/negotiations/:negotiationId` | – | `{ data: { negotiation, offers, events } }`; complete history for agent participants and specifically required mandate owners. |
-| POST | `/api/negotiations/:negotiationId/offers` | `{ mandateId?, terms }` | `{ data: NegotiationOffer }`; initiator submits the first offer and the other participant counters. Recipient selects a mandate on their first response. |
-| POST | `/api/negotiations/:negotiationId/decision` | `{ decision: "accept" \| "reject" \| "cancel", mandateId?, reason? }` | `{ data: NegotiationRecord }`; acceptance returns `202` with `pending_owner_approval` when any mandate requires owner approval. Rejection requires a reason and only the initiator can cancel. |
-| POST | `/api/negotiations/:negotiationId/owner-approval` | `{ decision: "approve" \| "reject", reason? }` | Authenticated required-owner decision. Rejection requires a reason. The final approval revalidates both mandates and atomically reserves their budgets; earlier approvals reserve nothing. |
+| GET | `/api/negotiations/:negotiationId` | – | `{ data: { negotiation, offers, events, versions, dispute } }`; complete participant/required-owner history. Owner actor IDs are redacted from events and snapshots when not visible to the caller. |
+| GET | `/api/negotiations/:negotiationId/replay` | – | Chronological immutable negotiation snapshots, scoped to a participant or required owner. |
+| GET | `/api/negotiations/batches/:batchId` | – | Comparison of independently negotiated vendors; available only to the batch initiator and never returns another vendor's offers. |
+| POST | `/api/negotiations/:negotiationId/offers` | `{ mandateId?, expectedOfferId, terms }` | `{ data: NegotiationOffer }`; compare-and-swap against the observed latest offer. The initiator submits the first offer and the other participant counters. Replayed/stale writes cannot append duplicates. Recipient selects a mandate on their first response. |
+| POST | `/api/negotiations/:negotiationId/decision` | `{ decision, expectedOfferId, mandateId?, reason? }` | Acceptance/rejection must include a reason. The expected offer must still be current. Acceptance returns `202` while owner approval is pending; only the initiator can cancel. |
+| POST | `/api/negotiations/:negotiationId/owner-approval` | `{ decision, expectedOfferId, reason? }` | Required-owner-only review bound to the locked offer. Rejection requires a reason. The final approval revalidates both mandates and atomically reserves their budgets; earlier approvals reserve nothing. |
+| POST | `/api/negotiations/:negotiationId/disputes` | `{ category, reason }` | Participant-only, one dispute escalation per accepted negotiation. |
+| GET | `/api/negotiations/analytics` | – | Authenticated sample-based status, offer-count, acceptance-rate, and resolution-time metrics; reports when the 100-record-per-side sample window is truncated. |
+| GET / PUT | `/api/negotiations/strategy` | Strategy profile | Caller-owned advisory profile: posture, prioritized terms, and concession step. It cannot change mandate authority. |
+| POST | `/api/negotiations/expire` | Scheduler bearer credential | Expires up to 100 due negotiations transactionally. Requires server-only `CRON_SECRET`; deployment must invoke it on a schedule. |
 
-Offer `terms` contain `title`, `category`, `description`, integer `amountMinor`, `currency`, and
-`deliveryDays`. The lifecycle states are `initiated`, `offer_submitted`, `counter_offered`,
+Offer `terms` contain a service title/category/description, integer minor-unit total and currency,
+delivery days, optional quantity/unit pricing with validated volume-discount tiers, SLA values,
+contract duration/renewal/notice/payment-schedule clauses, and up to 10 bounded `when`/`then`
+conditions. If quantity pricing is supplied, the server validates that the total exactly matches
+the unit price, quantity, and highest applicable volume discount. Terms are preserved in generated
+contract versions. Conditional clauses are recorded as agreement text, not treated as verified
+authorization evidence or a payment schedule.
+
+The lifecycle states are `initiated`, `offer_submitted`, `counter_offered`,
 `pending_owner_approval`, `accepted`, `rejected`, `expired`, and `cancelled`. Offer submission,
-agent decisions, and owner approvals validate state transitions transactionally. Each offer and
-transition appends a record under the negotiation's `offers` or `events` subcollection. Owners
-without agent profiles can review only negotiations that explicitly require their approval. Expiry
-is marked and recorded on the first attempted mutation after the deadline; there is no scheduled
-expiry worker.
+agent decisions, owner approvals, and dispute escalation validate state transitions transactionally.
+Each mutation advances a version and appends an immutable offer/event/snapshot. A 100-offer ceiling
+bounds history growth. Accepted and approval-pending offers are locked; a decision must name the
+offer ID rendered to the caller. Suspended agent profiles cannot submit or accept offers. Owners
+without agent profiles can review only negotiations that explicitly require their approval.
+Access-triggered expiry remains fail-closed, and the scheduled worker provides proactive expiry
+when configured.
 
 Acceptance revalidates the latest offer against both active mandates. If no owner approval is
 required, it reserves the agreed amount against both budgets in the same Firestore transaction. If
@@ -194,13 +209,16 @@ budget only; it does not execute a service, contract, payment, or operation auth
 
 | Method | Path | Request | Response / notes |
 |--------|------|---------|------------------|
-| POST | `/api/negotiations/:negotiationId/intelligence` | `{ action: "recommend" \| "compare" \| "summarize" }` | Participant-only advisory output. Recommendations include deterministic mandate and approval checks; comparisons include deterministic price, delivery, and mandate metrics. Summaries report included and total event/offer counts and include at most the latest 30 offers and 50 events. |
+| POST | `/api/negotiations/:negotiationId/intelligence` | `{ action: "recommend" \| "compare" \| "summarize" \| "analyze" }` | Participant-only advisory output. Recommendations use the caller's strategy profile and include deterministic mandate/approval checks. Comparisons include deterministic price deltas, delivery, and mandate metrics. Analysis identifies potential unfavorable terms and qualitative outcomes; price references are computed only from observed negotiation offers, not external market data. Summaries include at most 30 offers and 50 events. |
 | POST | `/api/negotiations/:negotiationId/intelligence` | `{ action: "explain_violation", terms }` | Deterministic explanation of whether proposed terms meet the caller's assigned mandate conditions. |
 
-Recommendations are not decisions: a counteroffer is returned only after deterministic mandate
-validation and is never submitted automatically. Model responses are strict-Zod validated. If Gemini
-is unavailable, deterministic offer metrics remain available with an explicit notice; recommendation
-and summary output is null rather than fabricated. Set server-only `GEMINI_API_KEY`; optional
+Recommendations and outcome predictions are not decisions: a counteroffer is returned only after
+deterministic mandate validation and is never submitted automatically. Every eventual acceptance
+still passes server-side mandate checks and required owner approval. Model responses are strict-Zod
+validated and cannot mutate negotiation, approval, contract, or payment state. If Gemini is
+unavailable, deterministic offer metrics remain available with an explicit notice; model analysis
+and summary output is null rather than fabricated. The observed price reference is not represented
+as market pricing. Set server-only `GEMINI_API_KEY`; optional
 `GEMINI_MODEL` defaults to `gemini-2.5-flash`. Provider keys and AI output are not stored in Firestore.
 Contract analysis returns an explicit provider error when unavailable; it does not return a fabricated
 analysis.

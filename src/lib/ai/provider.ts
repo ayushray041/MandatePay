@@ -2,6 +2,7 @@ export type AiAction =
   | 'negotiation_recommendation'
   | 'offer_comparison'
   | 'negotiation_summary'
+  | 'negotiation_analysis'
   | 'contract_analysis';
 
 export type AiGenerationInput = {

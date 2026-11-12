@@ -41,7 +41,8 @@ export async function compareNegotiationOffers(
     now: Date;
   },
 ): Promise<OfferComparisonResponse> {
-  const deterministicOffers = input.offers.map((offer) => {
+  const deterministicOffers = input.offers.map((offer, index) => {
+    const previousOffer = input.offers[index - 1];
     const assessment = offer.mandate && offer.agent
       ? assessOffer(
         offer.mandate,
@@ -64,6 +65,13 @@ export async function compareNegotiationOffers(
       amountMinor: offer.terms.amountMinor,
       currency: offer.terms.currency,
       deliveryDays: offer.terms.deliveryDays,
+      priceDeltaFromPreviousMinor: previousOffer
+        && previousOffer.terms.currency === offer.terms.currency
+        ? offer.terms.amountMinor - previousOffer.terms.amountMinor
+        : null,
+      deliveryDeltaFromPreviousDays: previousOffer
+        ? offer.terms.deliveryDays - previousOffer.terms.deliveryDays
+        : null,
       mandateAllowed: assessment.allowed,
       mandateApprovalRequired: assessment.allowed && assessment.requiresApproval,
       mandateReasons: assessment.reasons.map(({ explanation }) => explanation),

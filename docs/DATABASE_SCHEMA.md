@@ -29,9 +29,12 @@ authenticated agent owner.
 | `mandates/{id}/versions` | Zero-padded version number | `version`, `createdBy`, `createdAt`, `reason`, complete `snapshot` | Append-only mandate policy/lifecycle snapshots. Direct client access is denied. |
 | `mandateAuthorizations` | Auto ID or SHA-256 idempotency key | `mandateId`, owner and assigned-agent IDs, operation, amount, currency, description, captured `mandateVersion`, approver IDs/quorum/approvals, pending reservation window keys, status, idempotency fingerprint, timestamps | Operation authorization requests and decisions. Pending requests reserve both total and UTC velocity budget transactionally; retries with the same idempotency key do not create duplicate reservations. Direct client access is denied. |
 | `auditLogs` | Auto ID | `entity`, `entityId`, `action`, `performedBy`, `payload`, `timestamp` | Immutable server-side mandate audit events. |
-| `negotiations` | Auto ID | `initiatorAgentId`, `recipientAgentId`, `initiatorMandateId`, nullable `recipientMandateId`, title, lifecycle status, expiry, current offer snapshot and ID, `requiredOwnerApprovalIds`, `ownerApprovals`, optional acceptance requester, `offerCount`, `eventCount`, resolution fields, timestamps | Private bilateral negotiation state. The recipient mandate is bound on the recipient's first counteroffer or acceptance. |
-| `negotiations/{id}/offers` | Auto ID | `negotiationId`, sequence, `submittedByAgentId`, `mandateId`, terms, `createdAt` | Append-only offer and counteroffer history. Terms contain title, category, description, amount in integer minor units, currency, and delivery days. |
-| `negotiations/{id}/events` | Auto ID | sequence, event type, exactly one agent or owner actor ID, optional offer ID and details, `createdAt` | Append-only negotiation lifecycle and activity history. |
+| `negotiations` | Auto ID | `initiatorAgentId`, `recipientAgentId`, both mandate IDs, title, lifecycle status, expiry, current and locked offer snapshots/IDs, `requiredOwnerApprovalIds`, `ownerApprovals`, decision reasons, `version`, `offerCount`, `eventCount`, optional batch metadata, reservation windows, resolution fields, timestamps | Private bilateral negotiation state. A batch groups independent negotiations; vendor decisions and reservations never affect siblings. The recipient mandate is bound on the first counteroffer or acceptance. |
+| `negotiations/{id}/offers` | Zero-padded sequence | `negotiationId`, sequence/version, `submittedByAgentId`, `mandateId`, terms, `createdAt` | Append-only offer/counteroffer history. A transaction checks `expectedOfferId` and serializes sequence allocation; no more than 100 offers are accepted. |
+| `negotiations/{id}/events` | Auto ID | sequence, event type, one agent, owner, or system actor ID, optional offer ID/details, `createdAt` | Append-only negotiation lifecycle and activity history. Owner and system actor identifiers are redacted in participant responses as needed. |
+| `negotiations/{id}/versions` | Zero-padded version | version, status, current offer snapshot/ID, offer count, redacted-on-read actor ID, timestamps | Append-only snapshots used for chronological replay and version history. |
+| `negotiations/{id}/disputes` | `current` | participant agent ID, category, bounded reason, open status, `createdAt` | One participant-raised dispute escalation per accepted negotiation; read/write is server-only. |
+| `negotiationStrategyProfiles` | Firebase `uid` | posture, unique priorities, concession step, owner ID, `updatedAt` | User-owned advisory preferences. They do not change mandate policy or grant transaction authority. |
 | `contracts` | Accepted negotiation ID | `negotiationId`, participant and approver UIDs, mandate IDs, lifecycle status, current version pointer, approvals, active amendment ID, expiry, event count, timestamps | One server-generated contract per accepted negotiation; all participant access is through authorized APIs. |
 | `contracts/{id}/versions` | `v1`, `v2`, ... | `contractId`, version, previous version ID, negotiation ID, optional amendment ID, creator, creation time, complete terms snapshot | Immutable contract documents. Approved amendments create a new version instead of modifying prior terms. |
 | `contracts/{id}/amendments` | Auto ID | base version, complete proposed terms, review status, required approvers, approvals, creator, rejection reason, timestamps | Amendment proposals and party decisions. |
@@ -41,14 +44,22 @@ authenticated agent owner.
 | `paypalWebhookEvents` | SHA-256 of provider event ID | original provider event ID, event type, processing outcome, payment ID, receive timestamp | Durable webhook idempotency receipts; does not store raw event bodies or signature headers. |
 
 Negotiation lifecycle states are `initiated`, `offer_submitted`, `counter_offered`,
-`pending_owner_approval`, `accepted`, `rejected`, `expired`, and `cancelled`. When either mandate
-requires owner approval, the negotiation records each required owner and their decisions; no budget
-is reserved until all required owners approve. Final approval revalidates both active mandates and
-reserves the amount transactionally on both participant mandates. Reserved amounts reduce available
-mandate capacity and are not an execution or payment record.
+`pending_owner_approval`, `accepted`, `rejected`, `expired`, and `cancelled`. Every state change
+advances the negotiation version and writes a snapshot. Mutations compare the expected current offer;
+acceptance locks that offer until all required owners approve or reject. When approval is required,
+no budget is reserved until the final approval revalidates both mandates and atomically reserves the
+amount against both. Reserved amounts reduce available mandate capacity and are not an execution or
+payment record. Optional quantity/SLA/contract/conditional terms are strictly validated and copied
+into immutable contract versions without being interpreted as payment authorization.
 
 Negotiation intelligence and contract analysis are stateless: requests use existing participant and
-contract-version records, and prompts/model responses are not persisted in Firestore.
+contract-version records plus caller-owned strategy profiles, and prompts/model responses are not
+persisted in Firestore. Price references use only observed offers and are labeled as non-market data.
+
+Negotiations expire on access and through `POST /api/negotiations/expire`. The worker transactionally
+marks at most 100 due records per call and appends the corresponding event/version. Production must
+configure a trusted scheduler to call the endpoint with server-only `CRON_SECRET`; no deployment
+platform or schedule is configured in this repository.
 
 Mandate daily, ISO-weekly, monthly, and recurring usage windows are computed in UTC. Pending
 operation approvals and accepted negotiations count against the applicable budget windows. Rejected
@@ -76,6 +87,7 @@ accepting client-provided identity or location.
 - Marketplace listings by publication status/time, owner/time, and agent/status/time.
 - Marketplace reviews by agent/time and organization membership by UID (collection group).
 - Negotiation inbox queries by `initiatorAgentId` or `recipientAgentId`, ordered by `updatedAt`.
+- Negotiation batch lookup by `batchId` and scheduled expiry by `status`/`expiresAt`.
 - Contract participant listing by `participantIds` and `updatedAt`.
 - Payment history listing by `participantIds` and `updatedAt`.
 - Amendment reviewer listing by `requiredApproverIds` and `updatedAt`.
@@ -87,7 +99,7 @@ Rules in `firestore.rules`:
 - Allow users to read only their own profile; all profile writes go through the authenticated API.
 - Deny direct client reads and writes for agent profiles, identity registry, API credentials,
   sessions, usage counters, activity, webhook registrations, mandates, authorizations, negotiations,
-  negotiation offers/events, contracts, contract versions, amendments, contract events, payments,
+  negotiation offers/events/versions/disputes, strategy profiles, contracts, contract versions, amendments, contract events, payments,
   payment events, marketplace profiles/listings/organizations/members/preferences/reviews/metrics,
   payment outcome receipts, and webhook idempotency receipts. APIs perform identity, participant,
   visibility, and ownership checks because Firebase Admin SDK access bypasses rules.

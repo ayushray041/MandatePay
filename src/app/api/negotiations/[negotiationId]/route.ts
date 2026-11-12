@@ -5,9 +5,11 @@ import {
   formatNegotiationEvent,
   formatNegotiationForViewer,
   formatNegotiationOffer,
+  formatNegotiationSnapshot,
 } from '@/lib/negotiations/format';
 import { assertNegotiationViewer } from '@/lib/negotiations/policy';
 import { negotiationErrorResponse } from '@/lib/negotiations/errors';
+import { timestampToIso } from '@/lib/mandates/format';
 
 type RouteContext = { params: Promise<{ negotiationId: string }> };
 
@@ -34,12 +36,24 @@ export async function GET(request: Request, context: RouteContext) {
     }
     assertNegotiationViewer(negotiation, authentication.user.uid);
 
-    const [offers, events, initiator, recipient] = await Promise.all([
+    const [offers, events, versions, disputeSnapshot, initiator, recipient] = await Promise.all([
       negotiationRef.collection('offers').orderBy('sequence', 'asc').get(),
       negotiationRef.collection('events').orderBy('sequence', 'asc').get(),
+      negotiationRef.collection('versions').orderBy('version', 'asc').get(),
+      negotiationRef.collection('disputes').doc('current').get(),
       firestore.collection('agents').doc(String(negotiation.initiatorAgentId)).get(),
       firestore.collection('agents').doc(String(negotiation.recipientAgentId)).get(),
     ]);
+    const disputeData = disputeSnapshot.data();
+    const formattedEvents = events.docs.map((event) => {
+      const formatted = formatNegotiationEvent(event.id, event.data());
+      if (formatted.actorOwnerId === authentication.user.uid) {
+        return formatted;
+      }
+      const publicEvent = { ...formatted };
+      delete publicEvent.actorOwnerId;
+      return publicEvent;
+    });
     return apiSuccess({
       negotiation: {
         ...formatNegotiationForViewer(snapshot.id, negotiation, authentication.user.uid),
@@ -47,15 +61,19 @@ export async function GET(request: Request, context: RouteContext) {
         recipientDisplayName: recipient.data()?.displayName ?? 'Agent',
       },
       offers: offers.docs.map((offer) => formatNegotiationOffer(offer.id, offer.data())),
-      events: events.docs.map((event) => {
-        const formatted = formatNegotiationEvent(event.id, event.data());
-        if (formatted.actorOwnerId === authentication.user.uid) {
-          return formatted;
-        }
-        const publicEvent = { ...formatted };
-        delete publicEvent.actorOwnerId;
-        return publicEvent;
-      }),
+      events: formattedEvents,
+      versions: versions.docs.map((version) => formatNegotiationSnapshot(
+        version.data(),
+        authentication.user.uid,
+        [String(negotiation.initiatorAgentId), String(negotiation.recipientAgentId)],
+      )),
+      dispute: disputeSnapshot.exists && disputeData
+        ? {
+            ...disputeData,
+            id: disputeSnapshot.id,
+            createdAt: timestampToIso(disputeData.createdAt),
+          }
+        : null,
     });
   } catch (error: unknown) {
     return negotiationErrorResponse(error);

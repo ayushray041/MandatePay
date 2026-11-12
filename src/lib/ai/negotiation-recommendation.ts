@@ -9,6 +9,7 @@ import { assertOfferWithinMandate } from '@/lib/negotiations/policy';
 import { NegotiationError } from '@/lib/negotiations/errors';
 import { assertExecutionAllowed } from '@/lib/mandates/policy';
 import type { NegotiationOfferTerms } from '@/models/negotiation';
+import type { NegotiationStrategyProfile } from '@/models/negotiation';
 
 type StoredData = Record<string, unknown>;
 
@@ -82,6 +83,7 @@ export async function recommendNegotiation(
     currentTerms: NegotiationOfferTerms | null;
     offers: Array<{ sequence: number; submittedByAgentId: string; terms: NegotiationOfferTerms }>;
     ownMandatePerspective: 'initiator' | 'recipient';
+    strategy?: NegotiationStrategyProfile;
     now: Date;
   },
 ): Promise<NegotiationRecommendationResponse> {
@@ -149,6 +151,11 @@ export async function recommendNegotiation(
           deliveryDays: offer.terms.deliveryDays,
         })),
         yourPerspective: input.ownMandatePerspective,
+        strategyProfile: input.strategy ?? {
+          posture: 'balanced',
+          priorities: ['price', 'delivery', 'certainty'],
+          concessionStepBasisPoints: 500,
+        },
       },
     });
     try {

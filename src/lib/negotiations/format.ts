@@ -76,7 +76,38 @@ export function formatNegotiationEvent(
   return {
     ...data,
     id,
-    actorType: typeof data.actorOwnerId === 'string' ? 'owner' : 'agent',
+    actorType: typeof data.actorOwnerId === 'string'
+      ? 'owner'
+      : typeof data.actorSystemId === 'string'
+        ? 'system'
+        : 'agent',
+    createdAt: timestampToIso(data.createdAt),
+  };
+}
+
+export function formatNegotiationSnapshot(
+  data: Record<string, unknown>,
+  viewerId: string,
+  participantAgentIds: string[],
+) {
+  const currentOffer =
+    typeof data.currentOffer === 'object' && data.currentOffer !== null
+      ? {
+          ...(data.currentOffer as Record<string, unknown>),
+          createdAt: timestampToIso((data.currentOffer as Record<string, unknown>).createdAt),
+        }
+      : null;
+  return {
+    ...data,
+    actorId: data.actorId === 'system:negotiation-expiry-worker'
+      ? 'system'
+      : data.actorId === viewerId
+        ? 'you'
+        : participantAgentIds.includes(String(data.actorId))
+          ? 'agent_participant'
+          : 'mandate_owner',
+    currentOffer,
+    updatedAt: timestampToIso(data.updatedAt),
     createdAt: timestampToIso(data.createdAt),
   };
 }

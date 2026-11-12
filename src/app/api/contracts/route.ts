@@ -79,6 +79,12 @@ export async function POST(request: Request) {
       if (negotiation.status !== 'accepted') {
         throw new ContractError(409, 'NEGOTIATION_NOT_ACCEPTED', 'Only an accepted negotiation can generate a contract.');
       }
+      if (
+        negotiation.lockedOfferId !== undefined
+        && negotiation.lockedOfferId !== negotiation.currentOfferId
+      ) {
+        throw new ContractError(409, 'ACCEPTED_OFFER_MISMATCH', 'The accepted offer snapshot is inconsistent.');
+      }
 
       const initiatorId = String(negotiation.initiatorAgentId ?? '');
       const recipientId = String(negotiation.recipientAgentId ?? '');
@@ -196,6 +202,27 @@ export async function POST(request: Request) {
         },
         amountMinor: currentTerms.data.amountMinor,
         currency: currentTerms.data.currency,
+        ...(
+          currentTerms.data.quantityPricing
+          || currentTerms.data.sla
+          || currentTerms.data.contractTerms
+          || currentTerms.data.conditions
+          ? {
+              negotiatedTerms: {
+                ...(currentTerms.data.quantityPricing
+                  ? { quantityPricing: currentTerms.data.quantityPricing }
+                  : {}),
+                ...(currentTerms.data.sla ? { sla: currentTerms.data.sla } : {}),
+                ...(currentTerms.data.contractTerms
+                  ? { contractTerms: currentTerms.data.contractTerms }
+                  : {}),
+                ...(currentTerms.data.conditions
+                  ? { conditions: currentTerms.data.conditions }
+                  : {}),
+              },
+            }
+          : {}
+        ),
         paymentConditions:
           'Payment schedule and method are not specified. This record does not authorize or process payment.',
         deliveryConditions:

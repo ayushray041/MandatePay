@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useCallback, useEffect, useState } from 'react';
-import { ArrowLeft, Ban, Check, Clock3, MessagesSquare, Send, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, Ban, Check, Clock3, MessagesSquare, Send, Sparkles, History, X } from 'lucide-react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { Button } from '@/components/ui/Button';
 import { getMyAgentProfile } from '@/lib/agents/client';
@@ -12,7 +12,9 @@ import { agentCategorySchema } from '@/models/agent';
 import {
   decideNegotiation,
   decideNegotiationOwnerApproval,
+  escalateNegotiationDispute,
   getNegotiation,
+  getNegotiationReplay,
   requestNegotiationIntelligence,
   submitNegotiationOffer,
   type NegotiationDetail as NegotiationDetailData,
@@ -20,7 +22,7 @@ import {
 import type { NegotiationIntelligenceResponse } from '@/models/ai';
 import type { AgentProfile } from '@/models/agent';
 import type { MandateRecord } from '@/models/mandate';
-import type { NegotiationStatus } from '@/models/negotiation';
+import { negotiationOfferTermsSchema, type NegotiationStatus } from '@/models/negotiation';
 
 const statusStyles: Record<NegotiationStatus, string> = {
   initiated: 'border-blue-700 bg-blue-50 text-blue-800',
@@ -44,6 +46,7 @@ const eventLabels: Record<string, string> = {
   'negotiation.rejected': 'Negotiation rejected',
   'negotiation.cancelled': 'Negotiation cancelled',
   'negotiation.expired': 'Negotiation expired',
+  'negotiation.dispute_escalated': 'Dispute escalated',
 };
 
 type Props = { negotiationId: string };
@@ -61,6 +64,8 @@ export function NegotiationDetail({ negotiationId }: Props) {
   const [intelligence, setIntelligence] = useState<NegotiationIntelligenceResponse | null>(null);
   const [intelligenceBusy, setIntelligenceBusy] = useState(false);
   const [intelligenceError, setIntelligenceError] = useState<string | null>(null);
+  const [replay, setReplay] = useState<Awaited<ReturnType<typeof getNegotiationReplay>> | null>(null);
+  const [replayBusy, setReplayBusy] = useState(false);
 
   const load = useCallback(async (showLoading = true) => {
     if (showLoading) {
@@ -180,32 +185,111 @@ export function NegotiationDetail({ negotiationId }: Props) {
       return;
     }
     const formData = new FormData(event.currentTarget);
-    const amountMinor = parseMajorAmount(
+    const enteredAmountMinor = parseMajorAmount(
       String(formData.get('amount') ?? ''),
       ownMandate.currency,
     );
-    if (amountMinor === null) {
-      setError('Enter a positive amount using the selected mandate currency precision.');
-      return;
-    }
     const category = agentCategorySchema.safeParse(formData.get('category'));
     if (!category.success) {
       setError('Choose a valid service category.');
       return;
     }
+    const quantity = String(formData.get('quantity') ?? '').trim();
+    const unitPrice = String(formData.get('unitPrice') ?? '').trim();
+    const discountPercent = String(formData.get('discountPercent') ?? '').trim();
+    let quantityPricing: {
+      quantity: number;
+      unitPriceMinor: number;
+      volumeDiscounts: Array<{ minimumQuantity: number; discountBasisPoints: number }>;
+    } | undefined;
+    let totalAmountMinor = enteredAmountMinor;
+    if (quantity || unitPrice || discountPercent) {
+      const quantityValue = Number(quantity);
+      const unitPriceMinor = parseMajorAmount(unitPrice, ownMandate.currency);
+      const discountBasisPoints = Math.round(Number(discountPercent || 0) * 100);
+      if (
+        !Number.isSafeInteger(quantityValue)
+        || quantityValue < 1
+        || quantityValue > 1_000_000
+        || unitPriceMinor === null
+        || !Number.isFinite(discountBasisPoints)
+        || discountBasisPoints < 0
+        || discountBasisPoints > 5000
+        || (discountBasisPoints > 0 && quantityValue < 2)
+      ) {
+        setError('Enter a valid quantity, unit price, and volume discount (0–50%).');
+        return;
+      }
+      const undiscounted = quantityValue * unitPriceMinor;
+      if (!Number.isSafeInteger(undiscounted)) {
+        setError('Quantity pricing exceeds the supported total.');
+        return;
+      }
+      const discountMultiplier = 10_000 - discountBasisPoints;
+      totalAmountMinor = Math.floor(undiscounted / 10_000) * discountMultiplier
+        + Math.round((undiscounted % 10_000) * discountMultiplier / 10_000);
+      quantityPricing = {
+        quantity: quantityValue,
+        unitPriceMinor,
+        volumeDiscounts: discountBasisPoints > 0
+          ? [{ minimumQuantity: Math.min(quantityValue, 2), discountBasisPoints }]
+          : [],
+      };
+    }
+    if (totalAmountMinor === null) {
+      setError('Enter a positive amount using the selected mandate currency precision.');
+      return;
+    }
+    const responseTime = String(formData.get('responseTimeHours') ?? '').trim();
+    const uptimePercent = String(formData.get('uptimePercent') ?? '').trim();
+    const supportHours = String(formData.get('supportHoursPerWeek') ?? '').trim();
+    const sla = responseTime || uptimePercent || supportHours
+      ? {
+          responseTimeHours: Number(responseTime),
+          uptimeBasisPoints: Math.round(Number(uptimePercent) * 100),
+          supportHoursPerWeek: Number(supportHours),
+        }
+      : undefined;
+    const durationMonths = String(formData.get('durationMonths') ?? '').trim();
+    const renewal = String(formData.get('renewal') ?? '').trim();
+    const noticeDays = String(formData.get('terminationNoticeDays') ?? '').trim();
+    const paymentSchedule = String(formData.get('paymentSchedule') ?? '').trim();
+    const contractTerms = durationMonths || renewal || noticeDays || paymentSchedule
+      ? {
+          durationMonths: durationMonths ? Number(durationMonths) : null,
+          renewal,
+          terminationNoticeDays: Number(noticeDays),
+          paymentSchedule,
+        }
+      : undefined;
+    const conditionWhen = String(formData.get('conditionWhen') ?? '').trim();
+    const conditionThen = String(formData.get('conditionThen') ?? '').trim();
+    const conditions = conditionWhen || conditionThen
+      ? [{ when: conditionWhen, then: conditionThen }]
+      : undefined;
     const terms = {
       title: String(formData.get('title') ?? ''),
       category: category.data,
       description: String(formData.get('description') ?? ''),
-      amountMinor,
+      amountMinor: totalAmountMinor,
       currency: ownMandate.currency,
       deliveryDays: Number(formData.get('deliveryDays')),
+      ...(quantityPricing ? { quantityPricing } : {}),
+      ...(sla ? { sla } : {}),
+      ...(contractTerms ? { contractTerms } : {}),
+      ...(conditions ? { conditions } : {}),
     };
+    const validatedTerms = negotiationOfferTermsSchema.safeParse(terms);
+    if (!validatedTerms.success) {
+      setError('Review the amount and optional commercial terms; one or more values are invalid.');
+      return;
+    }
     const form = event.currentTarget;
     const success = await runAction(
       () => submitNegotiationOffer(negotiation.id, {
         mandateId: ownMandate.id,
-        terms,
+        expectedOfferId: negotiation.currentOfferId,
+        terms: validatedTerms.data,
       }),
       'Offer submitted. It is recorded in the negotiation history.',
     );
@@ -226,6 +310,7 @@ export function NegotiationDetail({ negotiationId }: Props) {
         decision,
         ...(decision === 'accept' && ownMandate ? { mandateId: ownMandate.id } : {}),
         ...(reason ? { reason } : {}),
+        expectedOfferId: negotiation.currentOfferId,
       }),
       (result) => decision === 'accept'
         ? result.status === 'pending_owner_approval'
@@ -248,6 +333,7 @@ export function NegotiationDetail({ negotiationId }: Props) {
       () => decideNegotiationOwnerApproval(negotiation.id, {
         decision,
         ...(reason ? { reason } : {}),
+        expectedOfferId: negotiation.currentOfferId ?? '',
       }),
       (result) => result.status === 'accepted'
         ? 'All required owners approved. The negotiated amount is now reserved against both mandates.'
@@ -267,6 +353,27 @@ export function NegotiationDetail({ negotiationId }: Props) {
     await reviewOwnerApproval('reject', reason);
   };
 
+  const escalateDispute = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!negotiation) {
+      return;
+    }
+    const formData = new FormData(event.currentTarget);
+    const category = String(formData.get('category') ?? '');
+    const reason = String(formData.get('reason') ?? '').trim();
+    if (!['delivery', 'quality', 'payment', 'scope', 'other'].includes(category) || reason.length < 10) {
+      setError('Choose a dispute category and provide at least 10 characters of detail.');
+      return;
+    }
+    await runAction(
+      () => escalateNegotiationDispute(negotiation.id, {
+        category: category as 'delivery' | 'quality' | 'payment' | 'scope' | 'other',
+        reason,
+      }),
+      'Dispute escalation recorded.',
+    );
+  };
+
   const reject = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const reason = String(new FormData(event.currentTarget).get('reason') ?? '').trim();
@@ -277,9 +384,19 @@ export function NegotiationDetail({ negotiationId }: Props) {
     await decide('reject', reason);
   };
 
+  const accept = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const reason = String(new FormData(event.currentTarget).get('reason') ?? '').trim();
+    if (!reason) {
+      setError('Provide an acceptance reason before accepting.');
+      return;
+    }
+    await decide('accept', reason);
+  };
+
   const runIntelligence = async (
     input:
-      | { action: 'recommend' | 'compare' | 'summarize' }
+      | { action: 'recommend' | 'compare' | 'summarize' | 'analyze' }
       | { action: 'explain_violation'; terms: NonNullable<typeof currentOffer>['terms'] },
   ) => {
     if (!negotiation) {
@@ -296,6 +413,18 @@ export function NegotiationDetail({ negotiationId }: Props) {
       setIntelligence(null);
     } finally {
       setIntelligenceBusy(false);
+    }
+  };
+
+  const loadReplay = async () => {
+    setReplayBusy(true);
+    setError(null);
+    try {
+      setReplay(await getNegotiationReplay(negotiationId));
+    } catch (caughtError: unknown) {
+      setError(caughtError instanceof Error ? caughtError.message : 'Negotiation replay could not be loaded.');
+    } finally {
+      setReplayBusy(false);
     }
   };
 
@@ -370,6 +499,7 @@ export function NegotiationDetail({ negotiationId }: Props) {
         <p className="border border-emerald-700 bg-emerald-50 p-4 text-sm text-emerald-900">
           Accepted terms are reserved against both mandates. This records agreement only; it does not
           execute a service, contract, or payment.
+          {negotiation.acceptanceReason ? ` Acceptance reason: ${negotiation.acceptanceReason}` : ''}
         </p>
       )}
       {negotiation.status === 'pending_owner_approval' && (
@@ -387,6 +517,31 @@ export function NegotiationDetail({ negotiationId }: Props) {
         <p className="border border-red-700 bg-red-50 p-4 text-sm">
           Rejection reason: {negotiation.rejectionReason}
         </p>
+      )}
+      {detail.dispute && (
+        <p className="border border-red-700 bg-red-50 p-4 text-sm">
+          Open {detail.dispute.category} dispute raised by {detail.dispute.raisedByAgentId === user?.uid ? 'you' : 'the other participant'}:
+          {' '}{detail.dispute.reason}
+        </p>
+      )}
+      {!detail.dispute && negotiation.status === 'accepted' && participantRole && (
+        <form onSubmit={escalateDispute} className="grid gap-3 border border-mp-warm-grey bg-mp-surface p-4 sm:grid-cols-[12rem_minmax(0,1fr)_auto] sm:items-end">
+          <label>
+            <span className="mp-label">Dispute category</span>
+            <select name="category" className="mp-input mt-1">
+              <option value="delivery">Delivery</option>
+              <option value="quality">Quality</option>
+              <option value="payment">Payment</option>
+              <option value="scope">Scope</option>
+              <option value="other">Other</option>
+            </select>
+          </label>
+          <label>
+            <span className="mp-label">Escalation details</span>
+            <input name="reason" required minLength={10} maxLength={2000} className="mp-input mt-1" />
+          </label>
+          <Button type="submit" variant="outline" disabled={busy}>Escalate dispute</Button>
+        </form>
       )}
 
       {currentOffer ? (
@@ -461,6 +616,11 @@ export function NegotiationDetail({ negotiationId }: Props) {
           <Button type="button" variant="outline" disabled={intelligenceBusy} onClick={() => void runIntelligence({ action: 'summarize' })}>
             Summarize history
           </Button>
+          {detail.offers.length > 0 && (
+            <Button type="button" variant="outline" disabled={intelligenceBusy} onClick={() => void runIntelligence({ action: 'analyze' })}>
+              Analyze terms and outcome
+            </Button>
+          )}
           {!terminal && currentOffer && ownMandate && (
             <Button
               type="button"
@@ -548,11 +708,12 @@ export function NegotiationDetail({ negotiationId }: Props) {
                 )}
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm">
-                    <thead><tr><th className="py-2 pr-3">Offer</th><th className="py-2 pr-3">Price</th><th className="py-2 pr-3">Delivery</th><th className="py-2">Mandate</th></tr></thead>
+                    <thead><tr><th className="py-2 pr-3">Offer</th><th className="py-2 pr-3">Price</th><th className="py-2 pr-3">Δ price</th><th className="py-2 pr-3">Delivery</th><th className="py-2">Mandate</th></tr></thead>
                     <tbody>{intelligence.offers.map((offer) => (
                       <tr key={offer.sequence} className="border-t border-mp-warm-grey">
                         <td className="py-2 pr-3">#{offer.sequence} · {offer.perspective === 'you' ? 'You' : 'Other party'}</td>
                         <td className="py-2 pr-3">{formatMinorAmount(offer.amountMinor, offer.currency)}</td>
+                        <td className="py-2 pr-3">{offer.priceDeltaFromPreviousMinor === null ? '—' : formatMinorAmount(offer.priceDeltaFromPreviousMinor, offer.currency)}</td>
                         <td className="py-2 pr-3">{offer.deliveryDays} days</td>
                         <td className="py-2">
                           {offer.mandateAllowed
@@ -580,6 +741,38 @@ export function NegotiationDetail({ negotiationId }: Props) {
                   </>
                 )}
               </>
+            )}
+            {intelligence.action === 'analyze' && (
+                  <>
+                    <p className="mp-kicker">{intelligence.source === 'gemini' ? 'Advisory analysis' : 'Deterministic price analysis'}</p>
+                    <p className="text-xs text-mp-medium-grey">Price analysis includes {intelligence.coverage.includedOffers} of {intelligence.coverage.totalOffers} offers.</p>
+                    {intelligence.notice && <p className="text-sm">{intelligence.notice}</p>}
+                    {intelligence.observedPriceReference && (
+                      <p className="text-sm">
+                        Observed price range: {formatMinorAmount(intelligence.observedPriceReference.lowMinor, intelligence.observedPriceReference.currency)}
+                        {' – '}{formatMinorAmount(intelligence.observedPriceReference.highMinor, intelligence.observedPriceReference.currency)}
+                        {' · median '}{formatMinorAmount(intelligence.observedPriceReference.medianMinor, intelligence.observedPriceReference.currency)}
+                        {' · '}{intelligence.observedPriceReference.sampleSize} offers. {intelligence.observedPriceReference.disclaimer}
+                      </p>
+                    )}
+                    {intelligence.analysis && (
+                      <>
+                        <p className="text-sm font-semibold">Potentially unfavorable terms</p>
+                        {intelligence.analysis.unfavorableTerms.map((item, index) => (
+                          <p key={`${item.offerSequence}-${index}`} className="text-sm">
+                            Offer #{item.offerSequence} · {item.severity}: {item.term} — {item.concern}
+                          </p>
+                        ))}
+                        <p className="text-sm font-semibold">Suggested strategies</p>
+                        {intelligence.analysis.strategies.map((item, index) => (
+                          <p key={`${item.strategy}-${index}`} className="text-sm">{item.strategy}: {item.rationale}</p>
+                        ))}
+                        <p className="text-sm">
+                          Outcome outlook ({intelligence.analysis.outcomePrediction.likelihood}): {intelligence.analysis.outcomePrediction.rationale}
+                        </p>
+                      </>
+                    )}
+                  </>
             )}
           </div>
         )}
@@ -695,13 +888,38 @@ export function NegotiationDetail({ negotiationId }: Props) {
                 <textarea name="description" required minLength={10} maxLength={3000} rows={4} className="mp-input mt-1" />
               </label>
               <label>
-                <span className="mp-label">Price ({ownMandate.currency})</span>
-                <input name="amount" type="number" min="0" step="any" required className="mp-input mt-1" />
+                <span className="mp-label">Total price ({ownMandate.currency})</span>
+                <input name="amount" type="number" min="0" step="any" className="mp-input mt-1" />
+                <span className="mt-1 block text-xs text-mp-medium-grey">Required unless quantity pricing is supplied.</span>
               </label>
               <label>
                 <span className="mp-label">Delivery days</span>
                 <input name="deliveryDays" type="number" min="1" max="3650" required defaultValue={14} className="mp-input mt-1" />
               </label>
+              <fieldset className="grid gap-3 border border-mp-warm-grey p-3 sm:col-span-2 sm:grid-cols-3">
+                <legend className="px-1 text-sm font-semibold">Quantity and volume pricing (optional)</legend>
+                <label><span className="mp-label">Quantity</span><input name="quantity" type="number" min="1" max="1000000" className="mp-input mt-1" /></label>
+                <label><span className="mp-label">Unit price ({ownMandate.currency})</span><input name="unitPrice" type="number" min="0" step="any" className="mp-input mt-1" /></label>
+                <label><span className="mp-label">Volume discount (%)</span><input name="discountPercent" type="number" min="0" max="50" step="0.01" className="mp-input mt-1" /></label>
+              </fieldset>
+              <fieldset className="grid gap-3 border border-mp-warm-grey p-3 sm:col-span-2 sm:grid-cols-3">
+                <legend className="px-1 text-sm font-semibold">Service-level agreement (optional)</legend>
+                <label><span className="mp-label">Response time (hours)</span><input name="responseTimeHours" type="number" min="1" max="8760" className="mp-input mt-1" /></label>
+                <label><span className="mp-label">Uptime (%)</span><input name="uptimePercent" type="number" min="50" max="100" step="0.01" className="mp-input mt-1" /></label>
+                <label><span className="mp-label">Support hours/week</span><input name="supportHoursPerWeek" type="number" min="0" max="168" className="mp-input mt-1" /></label>
+              </fieldset>
+              <fieldset className="grid gap-3 border border-mp-warm-grey p-3 sm:col-span-2 sm:grid-cols-2">
+                <legend className="px-1 text-sm font-semibold">Contract terms (optional)</legend>
+                <label><span className="mp-label">Duration (months)</span><input name="durationMonths" type="number" min="1" max="120" className="mp-input mt-1" /></label>
+                <label><span className="mp-label">Renewal</span><select name="renewal" defaultValue="" className="mp-input mt-1"><option value="">Not specified</option><option value="none">None</option><option value="monthly">Monthly</option><option value="annual">Annual</option></select></label>
+                <label><span className="mp-label">Termination notice (days)</span><input name="terminationNoticeDays" type="number" min="0" max="365" className="mp-input mt-1" /></label>
+                <label><span className="mp-label">Payment schedule</span><select name="paymentSchedule" defaultValue="" className="mp-input mt-1"><option value="">Not specified</option><option value="upfront">Upfront</option><option value="milestone">Milestone</option><option value="completion">On completion</option></select></label>
+              </fieldset>
+              <fieldset className="grid gap-3 border border-mp-warm-grey p-3 sm:col-span-2 sm:grid-cols-2">
+                <legend className="px-1 text-sm font-semibold">Conditional offer (optional)</legend>
+                <label><span className="mp-label">If</span><input name="conditionWhen" maxLength={300} className="mp-input mt-1" /></label>
+                <label><span className="mp-label">Then</span><input name="conditionThen" maxLength={300} className="mp-input mt-1" /></label>
+              </fieldset>
               <div className="sm:col-span-2">
                 <Button type="submit" disabled={busy || (needsMandate && !ownMandate)}>
                   <Send size={16} aria-hidden="true" /> {busy ? 'Submitting…' : 'Submit offer'}
@@ -717,9 +935,15 @@ export function NegotiationDetail({ negotiationId }: Props) {
           {canRespond && (
             <>
               {ownMandate ? (
-                <Button type="button" disabled={busy} onClick={() => void decide('accept')}>
-                  <Check size={16} aria-hidden="true" /> Accept latest offer
-                </Button>
+                <form onSubmit={accept} className="flex flex-wrap items-end gap-2">
+                  <label>
+                    <span className="mp-label">Acceptance reason</span>
+                    <input name="reason" required maxLength={1000} className="mp-input mt-1 min-w-64" />
+                  </label>
+                  <Button type="submit" disabled={busy}>
+                    <Check size={16} aria-hidden="true" /> Accept latest offer
+                  </Button>
+                </form>
               ) : (
                 <p className="w-full text-sm text-mp-medium-grey">
                   Select an active mandate above before accepting.
@@ -782,7 +1006,12 @@ export function NegotiationDetail({ negotiationId }: Props) {
           )}
         </div>
         <div>
-          <h2 className="text-lg font-semibold">Activity timeline</h2>
+          <div className="flex items-center justify-between gap-3">
+            <h2 className="text-lg font-semibold">Activity timeline</h2>
+            <Button type="button" variant="outline" disabled={replayBusy} onClick={() => void loadReplay()}>
+              <History size={15} aria-hidden="true" /> {replayBusy ? 'Loading…' : 'Replay versions'}
+            </Button>
+          </div>
           {detail.events.length === 0 ? (
             <p className="mp-copy mt-3 text-sm">No activity has been recorded.</p>
           ) : (
@@ -792,7 +1021,9 @@ export function NegotiationDetail({ negotiationId }: Props) {
                   <span className="absolute -left-[1.65rem] top-2 h-2.5 w-2.5 rounded-full bg-mp-orange" aria-hidden="true" />
                   <p className="font-semibold">{eventLabels[event.type] ?? event.type}</p>
                   <p className="mt-1 text-sm text-mp-medium-grey">
-                    {event.actorType === 'owner'
+                    {event.actorType === 'system'
+                      ? 'MandatePay system'
+                      : event.actorType === 'owner'
                       ? event.actorOwnerId === user?.uid ? 'You' : 'Mandate owner'
                       : event.actorAgentId
                         ? event.actorAgentId === user?.uid
@@ -809,6 +1040,24 @@ export function NegotiationDetail({ negotiationId }: Props) {
                 </li>
               ))}
             </ol>
+          )}
+          {replay && (
+            <div className="mt-5 border-t border-mp-warm-grey pt-4">
+              <p className="mp-kicker">Version replay · current version {replay.currentVersion}</p>
+              <ol className="mt-3 space-y-2">
+                {replay.snapshots.map((snapshot) => (
+                  <li key={snapshot.version} className="border border-mp-warm-grey p-3 text-sm">
+                    <p className="font-semibold">Version {snapshot.version} · {snapshot.status.replaceAll('_', ' ')}</p>
+                    <p className="mt-1 text-mp-medium-grey">
+                      {snapshot.currentOffer
+                        ? `Offer #${snapshot.currentOffer.sequence} · ${formatMinorAmount(snapshot.currentOffer.terms.amountMinor, snapshot.currentOffer.terms.currency)}`
+                        : 'No offer submitted'}
+                      {' · '}{snapshot.createdAt ? new Date(snapshot.createdAt).toLocaleString() : 'Time unavailable'}
+                    </p>
+                  </li>
+                ))}
+              </ol>
+            </div>
           )}
         </div>
       </section>

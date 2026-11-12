@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import { agentCategorySchema } from '@/models/agent';
 import { mandateCurrencySchema } from '@/models/mandate';
+import {
+  negotiationConditionSchema,
+  negotiationContractTermsSchema,
+  negotiationQuantityPricingSchema,
+  negotiationSlaSchema,
+} from '@/models/negotiation';
 
 export const contractStatuses = [
   'pending_review',
@@ -36,6 +42,12 @@ export const contractTermsSchema = z.object({
   service: contractServiceSchema,
   amountMinor: z.number().int().positive().max(100_000_000_000),
   currency: mandateCurrencySchema,
+  negotiatedTerms: z.object({
+    quantityPricing: negotiationQuantityPricingSchema.optional(),
+    sla: negotiationSlaSchema.optional(),
+    contractTerms: negotiationContractTermsSchema.optional(),
+    conditions: z.array(negotiationConditionSchema).max(10).optional(),
+  }).strict().optional(),
   paymentConditions: z.string().trim().min(1).max(2000),
   deliveryConditions: z.string().trim().min(1).max(2000),
   expiresAt: z.string().datetime({ offset: true }),

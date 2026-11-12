@@ -50,6 +50,9 @@ const mocks = vi.hoisted(() => ({
     },
     offerCount: 1,
     eventCount: 2,
+    version: 1,
+    lockedOfferId: null,
+    acceptanceReason: null as string | null,
     ownerApprovals: [] as string[],
     requiredOwnerApprovalIds: [] as string[],
   },
@@ -114,10 +117,23 @@ const offerUrl = 'https://example.test/api/negotiations/negotiation-1/offers';
 let transaction!: TestTransaction;
 
 function request(url: string, body: unknown) {
+  const negotiationBody = body && typeof body === 'object' ? body as Record<string, unknown> : {};
+  const currentOfferId = url.includes('negotiation-2')
+    ? 'offer-1'
+    : mocks.negotiationData.currentOfferId;
   return new Request(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      ...negotiationBody,
+      ...(!Object.prototype.hasOwnProperty.call(negotiationBody, 'expectedOfferId')
+        && (url.endsWith('/offers') || url.endsWith('/decision') || url.endsWith('/owner-approval'))
+        ? { expectedOfferId: currentOfferId ?? null }
+        : {}),
+      ...(negotiationBody.decision === 'accept' && !('reason' in negotiationBody)
+        ? { reason: 'Reviewed terms and accepted.' }
+        : {}),
+    }),
   });
 }
 
@@ -159,6 +175,9 @@ describe('negotiation state transitions', () => {
       },
       offerCount: 1,
       eventCount: 2,
+      version: 1,
+      lockedOfferId: null,
+      acceptanceReason: null,
       ownerApprovals: [],
       requiredOwnerApprovalIds: [],
     };
@@ -277,11 +296,75 @@ describe('negotiation state transitions', () => {
       status: 'counter_offered',
       recipientMandateId: 'mandate-2',
       offerCount: 2,
+      version: 2,
+      lockedOfferId: null,
     });
     expect(mocks.transaction.create).toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'negotiations/negotiation-1/offers' }),
       expect.objectContaining({ sequence: 2, submittedByAgentId: 'agent-2' }),
     );
+  });
+
+  it('prevents a suspended participant from submitting a counteroffer', async () => {
+    mocks.agentData['agent-2'].status = 'suspended';
+    const response = await submitOffer(
+      request(offerUrl, {
+        mandateId: 'mandate-2',
+        terms: {
+          title: 'Revised API integration',
+          category: 'software',
+          description: 'Build and document the billing service integration.',
+          amountMinor: 10_000,
+          currency: 'USD',
+          deliveryDays: 18,
+        },
+      }),
+      context,
+    );
+
+    expect(response.status).toBe(403);
+    expect(mocks.negotiationData.offerCount).toBe(1);
+    expect(mocks.transaction.create).not.toHaveBeenCalled();
+  });
+
+  it('rejects a stale counteroffer and repeated HTTP retries without appending duplicates', async () => {
+    const firstRequest = {
+      mandateId: 'mandate-2',
+      expectedOfferId: 'offer-1',
+      terms: {
+        title: 'Revised API integration',
+        category: 'software',
+        description: 'Build and document the billing service integration.',
+        amountMinor: 10_000,
+        currency: 'USD',
+        deliveryDays: 18,
+      },
+    };
+    const first = await submitOffer(request(offerUrl, firstRequest), context);
+    expect(first.status).toBe(201);
+    const createsAfterFirst = mocks.transaction.create.mock.calls.length;
+    const retry = await submitOffer(request(offerUrl, firstRequest), context);
+
+    expect(retry.status).toBe(409);
+    expect(mocks.transaction.create).toHaveBeenCalledTimes(createsAfterFirst);
+    expect(mocks.negotiationData.offerCount).toBe(2);
+  });
+
+  it('rejects stale decisions before authorizing a different latest offer', async () => {
+    const response = await decideNegotiation(
+      request(decisionUrl, {
+        decision: 'accept',
+        mandateId: 'mandate-2',
+        reason: 'Reviewed terms.',
+        expectedOfferId: 'older-offer',
+      }),
+      context,
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.negotiationData.status).toBe('offer_submitted');
+    expect(mocks.mandates['mandate-1'].reservedAmountMinor).toBe(0);
+    expect(mocks.mandates['mandate-2'].reservedAmountMinor).toBe(0);
   });
 
   it('atomically accepts the latest offer and reserves its value against both mandates', async () => {
@@ -292,6 +375,8 @@ describe('negotiation state transitions', () => {
 
     expect(response.status).toBe(200);
     expect(mocks.negotiationData.status).toBe('accepted');
+    expect(mocks.negotiationData.lockedOfferId).toBe('offer-1');
+    expect(mocks.negotiationData.acceptanceReason).toBe('Reviewed terms and accepted.');
     expect(mocks.mandates['mandate-1'].reservedAmountMinor).toBe(12_000);
     expect(mocks.mandates['mandate-2'].reservedAmountMinor).toBe(12_000);
     expect(mocks.transaction.create).toHaveBeenCalledWith(
@@ -461,6 +546,7 @@ describe('negotiation state transitions', () => {
       requiredOwnerApprovalIds: ['owner-1'],
       ownerApprovals: [],
       acceptanceRequestedByAgentId: 'agent-2',
+      lockedOfferId: 'offer-1',
     });
     expect(mocks.mandates['mandate-1'].reservedAmountMinor).toBe(0);
     expect(mocks.mandates['mandate-2'].reservedAmountMinor).toBe(0);

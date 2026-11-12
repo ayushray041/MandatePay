@@ -85,6 +85,7 @@ export function assertOfferWithinMandate(
   terms: NegotiationOfferTerms,
   now: Date,
 ): void {
+  assertNegotiationAgentActive(agent);
   assertMandateActive(mandate, agentId, now);
   if (
     mandate.currency !== terms.currency
@@ -101,6 +102,12 @@ export function assertOfferWithinMandate(
   }
 
   assertTermsWithinMandate(mandate, terms, now);
+}
+
+export function assertNegotiationAgentActive(agent: StoredData): void {
+  if (agent.status === 'suspended') {
+    throw new NegotiationError(403, 'AGENT_SUSPENDED', 'A suspended agent cannot negotiate or accept terms.');
+  }
 }
 
 export function assertTermsWithinMandate(

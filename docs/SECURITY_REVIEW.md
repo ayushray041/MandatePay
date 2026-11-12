@@ -37,9 +37,12 @@ approval and ledger updates.
 - **Mandates:** transaction-backed workflows validate active status, dates, allowed operations,
   conditions, approvals, and available budget. Owner revocation is irreversible, so a regression
   fix now rejects revocation while reservations remain.
-- **Negotiations:** state changes and offers are transactional; approval requirements are stored,
-  owner decisions are restricted to required owners, final approval revalidates both mandates, and
-  budget is reserved atomically only after all required approvals.
+- **Negotiations:** state changes and offers are transactional and compare the expected current
+  offer ID; accepted/pending offers are locked, offer history is bounded, and versions/events are
+  append-only. Required owners are revalidated before the final atomic dual-mandate reservation.
+  Suspended agents cannot submit or accept offers. Multi-vendor batches remain independent and
+  cross-vendor comparisons are restricted to the initiator. Owner actor identifiers are redacted
+  from snapshots/events where the viewer is not authorized to see them.
 - **Contracts:** one contract per accepted negotiation; required approvers are persisted; versions
   and events are append-only; amendment deltas and reservations are applied transactionally.
 - **Payments:** client amounts are rejected; amounts are derived from approved contract terms;
@@ -70,11 +73,16 @@ approval and ledger updates.
 - **Marketplace metrics:** Capture success/failure aggregates are updated with deduplication
   receipts in the same Firestore transaction as payment reconciliation. Metrics are informational
   and do not authorize a transaction or establish a service guarantee.
+- **Negotiation AI:** Model analysis, price comparisons, strategies, and outcome predictions are
+  advisory only. Counteroffers are not submitted automatically; mandate authorization and explicit
+  owner approval remain deterministic. Price references are derived from offers in the negotiation
+  and are not represented as external market data.
 
 ## Residual risks and verification gaps
 
-1. **Natural expiry and reserved funds:** there is no scheduled expiry/recovery worker. A reserved
-   accepted commitment can outlive a mandate and lacks a general recovery path. This is a business
+1. **Expiry scheduling and reserved funds:** a bounded negotiation-expiry endpoint is implemented,
+   but production must configure a scheduler and `CRON_SECRET`; no deployment scheduler is
+   configured here. A reserved accepted commitment can outlive a mandate and lacks a general recovery path. This is a business
    and financial consistency decision requiring an explicit approved policy; do not resolve it by
    silently releasing funds or weakening owner approval.
 2. **External service evidence:** Firebase, PayPal sandbox, and Gemini were not exercised with live

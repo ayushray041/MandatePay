@@ -53,10 +53,11 @@ function reference(kind: string, id: string) {
     id,
     get: async () => ({
       id,
-      exists: true,
+      exists: !kind.endsWith('/disputes'),
       data: () => kind === 'negotiations' ? negotiation : { displayName: `Display ${id}` },
     }),
     collection: (name: string) => ({
+      doc: (nestedId: string) => reference(`${kind}/${id}/${name}`, nestedId),
       orderBy: () => ({
         get: async () => {
           const docs: Array<{ id: string; data: () => Record<string, unknown> }> = name === 'offers'
@@ -64,11 +65,11 @@ function reference(kind: string, id: string) {
                 { id: 'offer-1', data: () => ({ sequence: 1, createdAt: new Date() }) },
                 { id: 'offer-2', data: () => ({ sequence: 2, createdAt: new Date() }) },
               ]
-            : [
+            : name === 'events' ? [
                 { id: 'event-1', data: () => ({ sequence: 1, type: 'negotiation.created' }) },
                 { id: 'event-2', data: () => ({ sequence: 2, type: 'offer.submitted' }) },
                 { id: 'event-3', data: () => ({ sequence: 3, type: 'offer.countered' }) },
-              ];
+              ] : [];
           if (name === 'events' && negotiation.status === 'pending_owner_approval') {
             docs.push({
               id: 'event-4',

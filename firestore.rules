@@ -89,6 +89,18 @@ service cloud.firestore {
       match /events/{eventId} {
         allow read, write: if false;
       }
+
+      match /versions/{versionId} {
+        allow read, write: if false;
+      }
+
+      match /disputes/{disputeId} {
+        allow read, write: if false;
+      }
+    }
+
+    match /negotiationStrategyProfiles/{uid} {
+      allow read, write: if false;
     }
 
     match /contracts/{contractId} {

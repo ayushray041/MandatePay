@@ -6,6 +6,7 @@ import { NegotiationError, negotiationErrorResponse } from '@/lib/negotiations/e
 import { writeNegotiationEvent } from '@/lib/negotiations/events';
 import { formatNegotiation, formatNegotiationForViewer } from '@/lib/negotiations/format';
 import { assertMandateActive } from '@/lib/negotiations/policy';
+import { writeNegotiationSnapshot } from '@/lib/negotiations/versions';
 import { negotiationCreateSchema } from '@/models/negotiation';
 
 const maxNegotiationLifetimeMs = 30 * 24 * 60 * 60 * 1000;
@@ -67,7 +68,12 @@ export async function POST(request: Request) {
   if (!parsed.success) {
     return apiError(400, 'INVALID_ARGUMENT', 'Negotiation request is invalid.');
   }
-  if (parsed.data.recipientAgentId === authentication.user.uid) {
+  const recipientAgentIds = parsed.data.recipientAgentIds
+    ?? (parsed.data.recipientAgentId ? [parsed.data.recipientAgentId] : []);
+  if (recipientAgentIds.length === 0) {
+    return apiError(400, 'INVALID_RECIPIENT', 'At least one recipient agent is required.');
+  }
+  if (recipientAgentIds.includes(authentication.user.uid)) {
     return apiError(400, 'INVALID_RECIPIENT', 'An agent cannot negotiate with itself.');
   }
   if (!adminFirestore) {
@@ -91,15 +97,16 @@ export async function POST(request: Request) {
   const uid = authentication.user.uid;
   const mandateRef = firestore.collection('mandates').doc(parsed.data.mandateId);
   const initiatorAgentRef = firestore.collection('agents').doc(uid);
-  const recipientAgentRef = firestore.collection('agents').doc(parsed.data.recipientAgentId);
-  const negotiationRef = firestore.collection('negotiations').doc();
+  const recipientAgentRefs = recipientAgentIds.map((agentId) => firestore.collection('agents').doc(agentId));
+  const negotiationRefs = recipientAgentIds.map(() => firestore.collection('negotiations').doc());
+  const batchId = negotiationRefs[0].id;
   try {
     const result = await firestore.runTransaction(async (transaction) => {
-      const [mandateSnapshot, initiatorAgentSnapshot, recipientAgentSnapshot] =
+      const [mandateSnapshot, initiatorAgentSnapshot, ...recipientAgentSnapshots] =
         await Promise.all([
           transaction.get(mandateRef),
           transaction.get(initiatorAgentRef),
-          transaction.get(recipientAgentRef),
+          ...recipientAgentRefs.map((reference) => transaction.get(reference)),
         ]);
       if (!mandateSnapshot.exists) {
         throw new NegotiationError(404, 'MANDATE_NOT_FOUND', 'Initiator mandate was not found.');
@@ -107,12 +114,12 @@ export async function POST(request: Request) {
       if (!initiatorAgentSnapshot.exists) {
         throw new NegotiationError(403, 'AGENT_NOT_REGISTERED', 'Register an agent profile before negotiating.');
       }
-      if (!recipientAgentSnapshot.exists) {
+      if (recipientAgentSnapshots.some((snapshot) => !snapshot.exists)) {
         throw new NegotiationError(404, 'RECIPIENT_NOT_FOUND', 'Recipient agent was not found.');
       }
       const mandate = mandateSnapshot.data();
       const initiatorAgent = initiatorAgentSnapshot.data();
-      const recipientAgent = recipientAgentSnapshot.data();
+      const recipientAgents = recipientAgentSnapshots.map((snapshot) => snapshot.data());
       if (!mandate) {
         throw new Error('Initiator mandate document has no data.');
       }
@@ -121,9 +128,13 @@ export async function POST(request: Request) {
         !initiatorAgent
         || !Array.isArray(initiatorAgent.supportedCurrencies)
         || !initiatorAgent.supportedCurrencies.includes(mandate.currency)
-        || !recipientAgent
-        || !Array.isArray(recipientAgent.supportedCurrencies)
-        || !recipientAgent.supportedCurrencies.includes(mandate.currency)
+        || initiatorAgent.status !== 'active'
+        || recipientAgents.some((recipientAgent) => (
+          !recipientAgent
+          || recipientAgent.status !== 'active'
+          || !Array.isArray(recipientAgent.supportedCurrencies)
+          || !recipientAgent.supportedCurrencies.includes(mandate.currency)
+        ))
       ) {
         throw new NegotiationError(
           409,
@@ -133,53 +144,69 @@ export async function POST(request: Request) {
       }
 
       const timestamp = getServerTimestamp();
-      transaction.create(negotiationRef, {
-        initiatorAgentId: uid,
-        recipientAgentId: parsed.data.recipientAgentId,
-        initiatorMandateId: parsed.data.mandateId,
-        recipientMandateId: null,
-        title: parsed.data.title,
-        status: 'initiated',
-        expiresAt,
-        currentOfferId: null,
-        currentOffer: null,
-        offerCount: 0,
-        eventCount: 1,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        acceptedAt: null,
-        resolvedByAgentId: null,
-        rejectionReason: null,
+      return negotiationRefs.map((negotiationRef, index) => {
+        const recipientAgentId = recipientAgentIds[index];
+        const negotiation = {
+          initiatorAgentId: uid,
+          recipientAgentId,
+          initiatorMandateId: parsed.data.mandateId,
+          recipientMandateId: null,
+          title: parsed.data.title,
+          status: 'initiated',
+          expiresAt,
+          currentOfferId: null,
+          currentOffer: null,
+          offerCount: 0,
+          eventCount: 1,
+          version: 1,
+          batchId,
+          batchIndex: index,
+          batchSize: recipientAgentIds.length,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          acceptedAt: null,
+          resolvedByAgentId: null,
+          rejectionReason: null,
+          acceptanceReason: null,
+          lockedOfferId: null,
+        };
+        transaction.create(negotiationRef, negotiation);
+        writeNegotiationEvent(transaction, negotiationRef, {
+          sequence: 1,
+          type: 'negotiation.created',
+          actorAgentId: uid,
+          details: {
+            recipientAgentId,
+            batchId,
+            batchIndex: index,
+            batchSize: recipientAgentIds.length,
+          },
+        });
+        writeNegotiationSnapshot(transaction, negotiationRef, {
+          version: 1,
+          status: 'initiated',
+          currentOfferId: null,
+          currentOffer: null,
+          offerCount: 0,
+          updatedAt: timestamp,
+          actorId: uid,
+        });
+        return {
+          id: negotiationRef.id,
+          ...negotiation,
+          createdAt: now,
+          updatedAt: now,
+        };
       });
-      writeNegotiationEvent(transaction, negotiationRef, {
-        sequence: 1,
-        type: 'negotiation.created',
-        actorAgentId: uid,
-        details: { recipientAgentId: parsed.data.recipientAgentId },
-      });
-
-      return {
-        id: negotiationRef.id,
-        initiatorAgentId: uid,
-        recipientAgentId: parsed.data.recipientAgentId,
-        initiatorMandateId: parsed.data.mandateId,
-        recipientMandateId: null,
-        title: parsed.data.title,
-        status: 'initiated',
-        expiresAt,
-        currentOfferId: null,
-        currentOffer: null,
-        offerCount: 0,
-        eventCount: 1,
-        createdAt: now,
-        updatedAt: now,
-        acceptedAt: null,
-        resolvedByAgentId: null,
-        rejectionReason: null,
-      };
     });
 
-    return apiSuccess(formatNegotiation(result.id, result), 201);
+    const formatted = result.map((negotiation) => formatNegotiation(negotiation.id, negotiation));
+    return apiSuccess(
+      formatted.length === 1
+        ? formatted[0]
+        : { batchId, negotiations: formatted },
+      201,
+    );
   } catch (error: unknown) {
     return negotiationErrorResponse(error);
   }

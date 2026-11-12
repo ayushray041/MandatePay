@@ -322,6 +322,29 @@ export function ContractDetail({ contractId }: { contractId: string }) {
             <p className="mt-2 whitespace-pre-wrap text-sm leading-6">{terms.service.description}</p>
           </section>
 
+          {terms.negotiatedTerms && (
+            <section className="border-t border-mp-warm-grey pt-5">
+              <h3 className="text-lg font-semibold">Negotiated commercial terms</h3>
+              <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                {terms.negotiatedTerms.quantityPricing && (
+                  <>
+                    <div><dt className="mp-kicker">Quantity</dt><dd className="mt-1">{terms.negotiatedTerms.quantityPricing.quantity} at {formatMinorAmount(terms.negotiatedTerms.quantityPricing.unitPriceMinor, terms.currency)} each</dd></div>
+                    <div><dt className="mp-kicker">Volume discounts</dt><dd className="mt-1">{terms.negotiatedTerms.quantityPricing.volumeDiscounts.length === 0 ? 'None' : terms.negotiatedTerms.quantityPricing.volumeDiscounts.map((tier) => `${tier.discountBasisPoints / 100}% from ${tier.minimumQuantity} units`).join(', ')}</dd></div>
+                  </>
+                )}
+                {terms.negotiatedTerms.sla && (
+                  <div><dt className="mp-kicker">Service levels</dt><dd className="mt-1">{terms.negotiatedTerms.sla.responseTimeHours}h response · {terms.negotiatedTerms.sla.uptimeBasisPoints / 100}% uptime · {terms.negotiatedTerms.sla.supportHoursPerWeek} support hours/week</dd></div>
+                )}
+                {terms.negotiatedTerms.contractTerms && (
+                  <div><dt className="mp-kicker">Contract terms</dt><dd className="mt-1">{terms.negotiatedTerms.contractTerms.durationMonths ?? 'Open-ended'} months · {terms.negotiatedTerms.contractTerms.renewal} renewal · {terms.negotiatedTerms.contractTerms.terminationNoticeDays} days notice · {terms.negotiatedTerms.contractTerms.paymentSchedule} payment</dd></div>
+                )}
+                {terms.negotiatedTerms.conditions?.map((condition, index) => (
+                  <div key={`${condition.when}-${index}`}><dt className="mp-kicker">Condition</dt><dd className="mt-1">If {condition.when}, then {condition.then}</dd></div>
+                ))}
+              </dl>
+            </section>
+          )}
+
           <section className="grid gap-6 border-t border-mp-warm-grey pt-5 md:grid-cols-2">
             <div>
               <h3 className="text-lg font-semibold">Price and currency</h3>

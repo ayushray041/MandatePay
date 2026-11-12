@@ -5,6 +5,7 @@ import { getServerTimestamp } from '@/lib/firebase/firestore';
 import { NegotiationError, negotiationErrorResponse } from '@/lib/negotiations/errors';
 import { writeNegotiationEvent } from '@/lib/negotiations/events';
 import { formatNegotiationOffer } from '@/lib/negotiations/format';
+import { nextNegotiationVersion, writeNegotiationSnapshot } from '@/lib/negotiations/versions';
 import {
   assertMandateActive,
   assertNegotiationParticipant,
@@ -42,7 +43,6 @@ export async function POST(request: Request, context: RouteContext) {
   const { negotiationId } = await context.params;
   const firestore = adminFirestore;
   const negotiationRef = firestore.collection('negotiations').doc(negotiationId);
-  const offerRef = negotiationRef.collection('offers').doc();
   const uid = authentication.user.uid;
   const now = new Date();
   try {
@@ -56,21 +56,36 @@ export async function POST(request: Request, context: RouteContext) {
         throw new Error('Negotiation document has no data.');
       }
       const participant = assertNegotiationParticipant(negotiation, uid);
+      if (parsed.data.expectedOfferId !== (negotiation.currentOfferId ?? null)) {
+        throw new NegotiationError(409, 'STALE_OFFER', 'The negotiation changed. Reload before submitting another offer.');
+      }
 
       if (isNegotiationTerminal(negotiation.status)) {
         throw new NegotiationError(409, 'NEGOTIATION_CLOSED', 'Negotiation is already closed.');
       }
       if (isNegotiationExpired(negotiation, now)) {
         const eventCount = Number(negotiation.eventCount ?? 0) + 1;
+        const version = nextNegotiationVersion(negotiation);
+        const timestamp = getServerTimestamp();
         transaction.update(negotiationRef, {
           status: 'expired',
           eventCount,
-          updatedAt: getServerTimestamp(),
+          version,
+          updatedAt: timestamp,
         });
         writeNegotiationEvent(transaction, negotiationRef, {
           sequence: eventCount,
           type: 'negotiation.expired',
           actorAgentId: uid,
+        });
+        writeNegotiationSnapshot(transaction, negotiationRef, {
+          version,
+          status: 'expired',
+          currentOfferId: typeof negotiation.currentOfferId === 'string' ? negotiation.currentOfferId : null,
+          currentOffer: negotiation.currentOffer ?? null,
+          offerCount: Number(negotiation.offerCount ?? 0),
+          updatedAt: timestamp,
+          actorId: uid,
         });
         return { expired: true as const };
       }
@@ -185,11 +200,17 @@ export async function POST(request: Request, context: RouteContext) {
       }
 
       const sequence = Number(negotiation.offerCount ?? 0) + 1;
+      if (!Number.isSafeInteger(sequence) || sequence > 100) {
+        throw new NegotiationError(409, 'OFFER_LIMIT_REACHED', 'This negotiation has reached its 100-offer limit.');
+      }
       const eventCount = Number(negotiation.eventCount ?? 0) + 1;
+      const version = nextNegotiationVersion(negotiation);
       const timestamp = getServerTimestamp();
+      const offerRef = negotiationRef.collection('offers').doc(String(sequence).padStart(6, '0'));
       const offer = {
         negotiationId,
         sequence,
+        version,
         submittedByAgentId: uid,
         mandateId,
         terms: parsed.data.terms,
@@ -212,6 +233,8 @@ export async function POST(request: Request, context: RouteContext) {
         },
         offerCount: sequence,
         eventCount,
+        version,
+        lockedOfferId: null,
         updatedAt: timestamp,
       });
       writeNegotiationEvent(transaction, negotiationRef, {
@@ -220,6 +243,21 @@ export async function POST(request: Request, context: RouteContext) {
         actorAgentId: uid,
         offerId: offerRef.id,
         details: { amountMinor: parsed.data.terms.amountMinor, currency: parsed.data.terms.currency },
+      });
+      writeNegotiationSnapshot(transaction, negotiationRef, {
+        version,
+        status: nextStatus,
+        currentOfferId: offerRef.id,
+        currentOffer: {
+          sequence,
+          submittedByAgentId: uid,
+          mandateId,
+          terms: parsed.data.terms,
+          createdAt: timestamp,
+        },
+        offerCount: sequence,
+        updatedAt: timestamp,
+        actorId: uid,
       });
 
       return {

@@ -7,6 +7,7 @@ export const negotiationIntelligenceRequestSchema = z.discriminatedUnion('action
   z.object({ action: z.literal('recommend') }).strict(),
   z.object({ action: z.literal('compare') }).strict(),
   z.object({ action: z.literal('summarize') }).strict(),
+  z.object({ action: z.literal('analyze') }).strict(),
   z.object({
     action: z.literal('explain_violation'),
     terms: negotiationOfferTermsSchema,
@@ -71,10 +72,54 @@ export const offerComparisonResponseSchema = z.object({
     amountMinor: z.number().int().positive(),
     currency: z.string().length(3),
     deliveryDays: z.number().int().positive(),
+    priceDeltaFromPreviousMinor: z.number().int().nullable(),
+    deliveryDeltaFromPreviousDays: z.number().int().nullable(),
     mandateAllowed: z.boolean(),
     mandateApprovalRequired: z.boolean(),
     mandateReasons: z.array(z.string().max(300)).max(10),
   }).strict()).max(20),
+  notice: z.string().nullable(),
+}).strict();
+
+export const negotiationAnalysisModelSchema = z.object({
+  unfavorableTerms: z.array(z.object({
+    offerSequence: z.number().int().positive(),
+    term: z.string().trim().min(1).max(120),
+    concern: z.string().trim().min(1).max(400),
+    severity: z.enum(['low', 'medium', 'high']),
+  }).strict()).max(10),
+  strategies: z.array(z.object({
+    strategy: z.string().trim().min(1).max(120),
+    rationale: z.string().trim().min(1).max(400),
+  }).strict()).max(5),
+  outcomePrediction: z.object({
+    likelihood: z.enum(['unlikely', 'uncertain', 'plausible', 'likely']),
+    rationale: z.string().trim().min(1).max(500),
+  }).strict(),
+}).strict();
+
+export const negotiationAnalysisResponseSchema = z.object({
+  action: z.literal('analyze'),
+  source: z.enum(['gemini', 'deterministic']),
+  priceDifferences: z.array(z.object({
+    offerSequence: z.number().int().positive(),
+    amountMinor: z.number().int().positive(),
+    deltaFromPreviousMinor: z.number().int().nullable(),
+    currency: z.string().length(3),
+  }).strict()).max(20),
+  observedPriceReference: z.object({
+    lowMinor: z.number().int().positive(),
+    medianMinor: z.number().int().positive(),
+    highMinor: z.number().int().positive(),
+    currency: z.string().length(3),
+    sampleSize: z.number().int().positive(),
+    disclaimer: z.literal('Observed negotiation prices only; not an external market estimate.'),
+  }).strict().nullable(),
+  coverage: z.object({
+    includedOffers: z.number().int().nonnegative(),
+    totalOffers: z.number().int().nonnegative(),
+  }).strict(),
+  analysis: negotiationAnalysisModelSchema.nullable(),
   notice: z.string().nullable(),
 }).strict();
 
@@ -125,6 +170,7 @@ export const negotiationIntelligenceResponseSchema = z.discriminatedUnion('actio
   mandateExplanationResponseSchema,
   offerComparisonResponseSchema,
   negotiationSummaryResponseSchema,
+  negotiationAnalysisResponseSchema,
 ]);
 
 export const contractAnalysisRequestSchema = z.object({}).strict();
@@ -133,5 +179,6 @@ export type NegotiationIntelligenceRequest = z.infer<typeof negotiationIntellige
 export type NegotiationRecommendationResponse = z.infer<typeof negotiationRecommendationResponseSchema>;
 export type OfferComparisonResponse = z.infer<typeof offerComparisonResponseSchema>;
 export type NegotiationSummaryResponse = z.infer<typeof negotiationSummaryResponseSchema>;
+export type NegotiationAnalysisResponse = z.infer<typeof negotiationAnalysisResponseSchema>;
 export type ContractAnalysisResponse = z.infer<typeof contractAnalysisResponseSchema>;
 export type NegotiationIntelligenceResponse = z.infer<typeof negotiationIntelligenceResponseSchema>;

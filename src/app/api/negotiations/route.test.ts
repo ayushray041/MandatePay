@@ -56,6 +56,7 @@ const mocks = vi.hoisted(() => ({
     },
   },
   agentData: {
+    status: 'active',
     categories: ['software'],
     supportedCurrencies: ['USD'],
   },
@@ -74,6 +75,7 @@ import { POST as submitOffer } from '@/app/api/negotiations/[negotiationId]/offe
 const negotiationContext = {
   params: Promise.resolve({ negotiationId: 'negotiation-1' }),
 };
+let generatedId = 0;
 
 const validTerms = {
   title: 'API integration',
@@ -85,10 +87,17 @@ const validTerms = {
 };
 
 function request(path: string, body: unknown) {
+  const parsedBody = body && typeof body === 'object' ? body as Record<string, unknown> : {};
   return new Request(`https://example.test${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    body: JSON.stringify({
+      ...parsedBody,
+      ...(path.endsWith('/offers')
+        && !Object.prototype.hasOwnProperty.call(parsedBody, 'expectedOfferId')
+        ? { expectedOfferId: mocks.negotiationData.currentOfferId }
+        : {}),
+    }),
   });
 }
 
@@ -97,7 +106,10 @@ function reference(kind: string, id = `${kind}-generated`): TestReference {
     kind,
     id,
     collection: (name) => ({
-      doc: (nestedId) => reference(`${kind}/${id}/${name}`, nestedId),
+      doc: (nestedId) => reference(
+        `${kind}/${id}/${name}`,
+        nestedId ?? `${kind}-${++generatedId}`,
+      ),
     }),
   };
 }
@@ -105,6 +117,7 @@ function reference(kind: string, id = `${kind}-generated`): TestReference {
 describe('negotiation offer APIs', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    generatedId = 0;
     mocks.negotiationData = {
       initiatorAgentId: 'agent-1',
       recipientAgentId: 'agent-2',
@@ -136,6 +149,7 @@ describe('negotiation offer APIs', () => {
       },
     };
     mocks.agentData = {
+      status: 'active',
       categories: ['software'],
       supportedCurrencies: ['USD'],
     };
@@ -144,7 +158,7 @@ describe('negotiation offer APIs', () => {
       user: { uid: 'agent-1' },
     });
     mocks.firestore.collection.mockImplementation((name: string) => ({
-      doc: (id?: string) => reference(name, id),
+      doc: (id?: string) => reference(name, id ?? `${name}-${++generatedId}`),
       where: () => ({
         orderBy: () => ({
           limit: () => ({ get: async () => ({ docs: [] }) }),
@@ -156,11 +170,9 @@ describe('negotiation offer APIs', () => {
       get: vi.fn(async (ref: TestReference) => {
         const data = ref.kind === 'negotiations' && ref.id === 'negotiation-1'
           ? mocks.negotiationData
-          : ref.kind === 'agents' && ref.id === 'agent-1'
+          : ref.kind === 'agents'
             ? mocks.agentData
-            : ref.kind === 'agents' && ref.id === 'agent-2'
-              ? mocks.agentData
-              : mocks.mandateData;
+            : mocks.mandateData;
         return {
           exists: true,
           data: () => data,
@@ -193,10 +205,32 @@ describe('negotiation offer APIs', () => {
         status: 'initiated',
       },
     });
+
     expect(mocks.transaction.create).toHaveBeenCalledWith(
       expect.objectContaining({ kind: 'negotiations' }),
       expect.objectContaining({ status: 'initiated', initiatorAgentId: 'agent-1' }),
     );
+  });
+
+  it('creates separate, independently addressable negotiations for a bounded vendor batch', async () => {
+    const response = await createNegotiation(
+      request('/api/negotiations', {
+        mandateId: 'mandate-1',
+        recipientAgentIds: ['agent-2', 'agent-3'],
+        title: 'Billing integration',
+        expiresAt: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString(),
+      }),
+    );
+    const payload = await response.json();
+    const rootWrites = mocks.transaction.create.mock.calls
+      .filter(([referenceValue]) => referenceValue.kind === 'negotiations');
+
+    expect(response.status).toBe(201);
+    expect(payload.data.negotiations).toHaveLength(2);
+    expect(payload.data.negotiations[0].id).not.toBe(payload.data.negotiations[1].id);
+    expect(rootWrites).toHaveLength(2);
+    expect(rootWrites.map(([, value]) => value.recipientAgentId)).toEqual(['agent-2', 'agent-3']);
+    expect(rootWrites[0][1].batchId).toBe(rootWrites[1][1].batchId);
   });
 
   it('submits the first offer as an immutable record under the initiator mandate', async () => {

@@ -35,7 +35,7 @@ The current dependency flow is:
 | Authentication and profiles | `src/lib/firebase`, `src/lib/api/auth.ts`, `/api/users/me` | User documents keyed by Firebase UID; caller identity is verified server-side. |
 | Mandates and authorizations | `src/lib/mandates`, `/api/mandates` | Integer minor units, owner/agent boundaries, lifecycle/expiry, approval rules, committed spend, reservations, and immutable audit events. |
 | Agents and agent IAM | `src/lib/agents`, `/api/agents`, `/api/agent/v1` | Verified account owner, immutable random agent ID registry, HMAC-hashed scoped API keys, expiry/revocation/session state, shared transactional minute/day quotas, runtime status/version and append-only activity; external mandate APIs additionally check mandate assignment. |
-| Negotiations | `src/lib/negotiations`, `/api/negotiations` | Agent UID identity; bilateral negotiation root with append-only offers/events; owner approval gates reservation. |
+| Negotiations | `src/lib/negotiations`, `/api/negotiations` | Participant-only state machine; CAS against current offer, versioned snapshots, independent comparison batches, owner approval gates atomic dual-mandate reservation, bounded expiry and dispute handling. |
 | Contracts and amendments | `src/lib/contracts`, `/api/contracts`, `/api/amendments` | Contract ID is the accepted negotiation ID; immutable version snapshots; required party approvals; transactional reservation deltas. |
 | Payments | `src/lib/payments`, `/api/payments` | One payment record per contract and cycle; amount from the approved version; PayPal sandbox operations; webhook receipts and ledger transitions are transactional. |
 | Advisory AI | `src/lib/ai`, intelligence and analysis routes | Stateless, participant-authorized advisory calls; output does not approve or mutate financial workflows. |
@@ -44,8 +44,9 @@ The current dependency flow is:
 
 The primary collections are `users`, `agents`, `agentIdentities`, `agentApiKeys`, `agentSessions`,
 `agentUsage`, `agentActivity`, `agentWebhooks`, `mandates`, `mandateAuthorizations`,
-`auditLogs`, `negotiations`, `contracts`, `payments`, and `paypalWebhookEvents`. Offers, negotiation
-events, contract versions, amendments, contract events, and payment events are subcollections.
+`auditLogs`, `negotiations`, `negotiationStrategyProfiles`, `contracts`, `payments`, and
+`paypalWebhookEvents`. Offers, negotiation events/versions/disputes, contract versions, amendments,
+contract events, and payment events are subcollections.
 Composite indexes are maintained in `firestore.indexes.json`.
 
 Client rules allow only a user to read their own profile. Workflow and financial collections are
@@ -57,8 +58,21 @@ defense.
 
 - Negotiation acceptance and final owner approval re-read both mandates and atomically reserve both
   budgets with the negotiation transition.
-- Duplicate decisions are rejected from current transactional state. Tests cover duplicate
-  decisions and serialized competing reservations using transaction test doubles.
+- Offer writes and decisions use the expected current offer ID as a compare-and-swap boundary.
+  Offers are append-only and capped at 100; acceptance/owner approval locks the accepted offer.
+- Each mutation advances a monotonic negotiation version and writes a replay snapshot. Independent
+  vendor batch children have isolated state and budget reservations; only the initiating agent can
+  access the cross-vendor comparison response.
+- Duplicate/stale decisions and offer retries are rejected without another append. Tests cover
+  owner-approval integration and serialized competing reservations using transaction test doubles.
+- Negotiated quantity pricing is checked against its exact total, and optional SLA, contract, and
+  conditional clauses are preserved into immutable contract versions. These clauses do not bypass
+  deterministic mandate authorization.
+- Dispute escalation is participant-only, accepted-state-only, and unique per negotiation. AI
+  comparison, strategy, observed-price references, and qualitative outcome predictions are
+  advisory; they never mutate approval or financial state.
+- Negotiation expiry is available through a credential-protected, bounded worker endpoint, while
+  access-time expiry remains in place. A deployment scheduler and `CRON_SECRET` are still required.
 - Contract generation uses the negotiation ID as a unique document key. Contract review and
   amendment decisions update approval state, immutable versions, audit events, and reservation
   deltas transactionally.
@@ -100,8 +114,8 @@ must be approved before adding an automated recovery process.
    actor attribution, and immutable audit events. Preserve the existing owner-approval boundary.
 5. Implement authenticated webhook delivery only with SSRF-safe egress controls, signed payloads,
    durable delivery attempts, and bounded retries.
-6. Add scheduled expiry and provider-reconciliation workers only after their retry, duplicate,
-   authorization, and observability contracts are specified.
+6. Configure a production scheduler for the bounded negotiation-expiry endpoint with a
+   server-managed `CRON_SECRET`; deployment-specific scheduling is intentionally not assumed.
 7. Add browser E2E tests and operational monitoring/runbooks before production rollout.
 8. Keep real-money movement and external service execution out of scope until separate compliance,
    legal, security, and operational approvals.

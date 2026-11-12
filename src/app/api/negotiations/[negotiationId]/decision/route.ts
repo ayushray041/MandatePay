@@ -6,9 +6,11 @@ import { addMandateVelocityUsage } from '@/lib/mandates/policy';
 import { NegotiationError, negotiationErrorResponse } from '@/lib/negotiations/errors';
 import { writeNegotiationEvent } from '@/lib/negotiations/events';
 import { formatNegotiationForViewer } from '@/lib/negotiations/format';
+import { nextNegotiationVersion, writeNegotiationSnapshot } from '@/lib/negotiations/versions';
 import {
   assertMandateActive,
   assertNegotiationParticipant,
+  assertNegotiationAgentActive,
   assertOfferWithinMandate,
   isNegotiationExpired,
   isNegotiationTerminal,
@@ -58,6 +60,9 @@ export async function POST(request: Request, context: RouteContext) {
         throw new Error('Negotiation document has no data.');
       }
       const participant = assertNegotiationParticipant(negotiation, uid);
+      if (parsed.data.expectedOfferId !== (negotiation.currentOfferId ?? null)) {
+        throw new NegotiationError(409, 'STALE_OFFER', 'The negotiation changed. Reload before deciding.');
+      }
       if (isNegotiationTerminal(negotiation.status)) {
         throw new NegotiationError(409, 'NEGOTIATION_CLOSED', 'Negotiation is already closed.');
       }
@@ -71,15 +76,27 @@ export async function POST(request: Request, context: RouteContext) {
           throw new NegotiationError(500, 'INVALID_NEGOTIATION', 'Negotiation event sequence is invalid.');
         }
         const eventCount = currentEventCount + 1;
+        const version = nextNegotiationVersion(negotiation);
+        const timestamp = getServerTimestamp();
         transaction.update(negotiationRef, {
           status: 'expired',
           eventCount,
-          updatedAt: getServerTimestamp(),
+          version,
+          updatedAt: timestamp,
         });
         writeNegotiationEvent(transaction, negotiationRef, {
           sequence: eventCount,
           type: 'negotiation.expired',
           actorAgentId: uid,
+        });
+        writeNegotiationSnapshot(transaction, negotiationRef, {
+          version,
+          status: 'expired',
+          currentOfferId: typeof negotiation.currentOfferId === 'string' ? negotiation.currentOfferId : null,
+          currentOffer: negotiation.currentOffer ?? null,
+          offerCount: Number(negotiation.offerCount ?? 0),
+          updatedAt: timestamp,
+          actorId: uid,
         });
         return { expired: true as const };
       }
@@ -130,6 +147,10 @@ export async function POST(request: Request, context: RouteContext) {
           ? 'rejected'
           : 'cancelled';
       const eventCount = Number(negotiation.eventCount ?? 0) + 1;
+      if (!Number.isSafeInteger(eventCount) || eventCount >= Number.MAX_SAFE_INTEGER) {
+        throw new NegotiationError(500, 'INVALID_NEGOTIATION', 'Negotiation event sequence is invalid.');
+      }
+      const version = nextNegotiationVersion(negotiation);
       const timestamp = getServerTimestamp();
 
       if (parsed.data.decision !== 'accept') {
@@ -139,7 +160,9 @@ export async function POST(request: Request, context: RouteContext) {
           ...(parsed.data.decision === 'reject'
             ? { rejectionReason: parsed.data.reason }
             : {}),
+          lockedOfferId: null,
           eventCount,
+          version,
           updatedAt: timestamp,
         });
         writeNegotiationEvent(transaction, negotiationRef, {
@@ -149,6 +172,15 @@ export async function POST(request: Request, context: RouteContext) {
           ...(parsed.data.decision === 'reject'
             ? { details: { reason: parsed.data.reason } }
             : {}),
+        });
+        writeNegotiationSnapshot(transaction, negotiationRef, {
+          version,
+          status: nextStatus,
+          currentOfferId: typeof negotiation.currentOfferId === 'string' ? negotiation.currentOfferId : null,
+          currentOffer: negotiation.currentOffer ?? null,
+          offerCount: Number(negotiation.offerCount ?? 0),
+          updatedAt: timestamp,
+          actorId: uid,
         });
         return {
           expired: false as const,
@@ -160,6 +192,8 @@ export async function POST(request: Request, context: RouteContext) {
             ...(parsed.data.decision === 'reject'
               ? { rejectionReason: parsed.data.reason }
               : {}),
+            lockedOfferId: null,
+            version,
             updatedAt: now,
           },
         };
@@ -241,6 +275,8 @@ export async function POST(request: Request, context: RouteContext) {
       if (!initiatorMandate || !recipientMandate || !initiatorAgent || !recipientAgent) {
         throw new Error('Negotiation participant data is incomplete.');
       }
+      assertNegotiationAgentActive(initiatorAgent);
+      assertNegotiationAgentActive(recipientAgent);
       assertMandateActive(initiatorMandate, initiatorId, now);
       assertMandateActive(recipientMandate, recipientId, now);
 
@@ -275,6 +311,9 @@ export async function POST(request: Request, context: RouteContext) {
           requiredOwnerApprovalGroups: approvalGroups,
           ownerApprovals: [],
           acceptanceRequestedByAgentId: uid,
+          acceptanceReason: parsed.data.reason,
+          lockedOfferId: String(negotiation.currentOfferId),
+          version,
           eventCount,
           updatedAt: timestamp,
         });
@@ -284,6 +323,15 @@ export async function POST(request: Request, context: RouteContext) {
           actorAgentId: uid,
           offerId: String(negotiation.currentOfferId),
           details: { requiredApprovalCount: requiredOwners.length },
+        });
+        writeNegotiationSnapshot(transaction, negotiationRef, {
+          version,
+          status: 'pending_owner_approval',
+          currentOfferId: String(negotiation.currentOfferId),
+          currentOffer,
+          offerCount: Number(negotiation.offerCount ?? 0),
+          updatedAt: timestamp,
+          actorId: uid,
         });
         return {
           expired: false as const,
@@ -297,6 +345,9 @@ export async function POST(request: Request, context: RouteContext) {
             requiredOwnerApprovalIds: requiredOwners,
             ownerApprovals: [],
             acceptanceRequestedByAgentId: uid,
+            acceptanceReason: parsed.data.reason,
+            lockedOfferId: String(negotiation.currentOfferId),
+            version,
             eventCount,
             updatedAt: now,
           },
@@ -329,12 +380,15 @@ export async function POST(request: Request, context: RouteContext) {
           : {}),
         status: 'accepted',
         acceptedAt: timestamp,
+        acceptanceReason: parsed.data.reason,
+        lockedOfferId: String(negotiation.currentOfferId),
         reservationUsageWindowKeys: {
           initiator: initiatorUsage.usageWindowKeys,
           recipient: recipientUsage.usageWindowKeys,
         },
         resolvedByAgentId: uid,
         eventCount,
+        version,
         updatedAt: timestamp,
       });
       writeNegotiationEvent(transaction, negotiationRef, {
@@ -343,6 +397,15 @@ export async function POST(request: Request, context: RouteContext) {
         actorAgentId: uid,
         offerId: String(negotiation.currentOfferId),
         details: { amountMinor: terms.amountMinor, currency: terms.currency },
+      });
+      writeNegotiationSnapshot(transaction, negotiationRef, {
+        version,
+        status: 'accepted',
+        currentOfferId: String(negotiation.currentOfferId),
+        currentOffer,
+        offerCount: Number(negotiation.offerCount ?? 0),
+        updatedAt: timestamp,
+        actorId: uid,
       });
 
       return {
@@ -355,7 +418,10 @@ export async function POST(request: Request, context: RouteContext) {
             : {}),
           status: 'accepted',
           acceptedAt: now,
+          acceptanceReason: parsed.data.reason,
+          lockedOfferId: String(negotiation.currentOfferId),
           resolvedByAgentId: uid,
+          version,
           eventCount,
           updatedAt: now,
         },
