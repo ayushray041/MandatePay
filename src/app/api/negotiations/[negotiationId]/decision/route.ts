@@ -2,6 +2,7 @@ import { adminFirestore } from '@/lib/firebase/admin';
 import { authenticateRequest } from '@/lib/api/auth';
 import { apiError, apiSuccess } from '@/lib/api/responses';
 import { getServerTimestamp } from '@/lib/firebase/firestore';
+import { addMandateVelocityUsage } from '@/lib/mandates/policy';
 import { NegotiationError, negotiationErrorResponse } from '@/lib/negotiations/errors';
 import { writeNegotiationEvent } from '@/lib/negotiations/events';
 import { formatNegotiationForViewer } from '@/lib/negotiations/format';
@@ -11,7 +12,7 @@ import {
   assertOfferWithinMandate,
   isNegotiationExpired,
   isNegotiationTerminal,
-  requiredOwnerApprovalIds,
+  requiredOwnerApprovalGroups,
 } from '@/lib/negotiations/policy';
 import {
   negotiationDecisionSchema,
@@ -257,11 +258,12 @@ export async function POST(request: Request, context: RouteContext) {
       } else {
         throw new NegotiationError(500, 'INVALID_OFFER', 'Offer author is not a negotiation participant.');
       }
-      const requiredOwners = requiredOwnerApprovalIds(
+      const approvalGroups = requiredOwnerApprovalGroups(
         [initiatorMandate, recipientMandate],
         terms,
         now,
       );
+      const requiredOwners = [...new Set(approvalGroups.flatMap((group) => group.approverIds))];
 
       if (requiredOwners.length > 0) {
         transaction.update(negotiationRef, {
@@ -270,6 +272,7 @@ export async function POST(request: Request, context: RouteContext) {
             : {}),
           status: 'pending_owner_approval',
           requiredOwnerApprovalIds: requiredOwners,
+          requiredOwnerApprovalGroups: approvalGroups,
           ownerApprovals: [],
           acceptanceRequestedByAgentId: uid,
           eventCount,
@@ -308,12 +311,16 @@ export async function POST(request: Request, context: RouteContext) {
       ) {
         throw new NegotiationError(500, 'INVALID_MANDATE', 'Mandate reservation data is invalid.');
       }
+      const initiatorUsage = addMandateVelocityUsage(initiatorMandate, terms.amountMinor, now);
+      const recipientUsage = addMandateVelocityUsage(recipientMandate, terms.amountMinor, now);
       transaction.update(initiatorMandateRef, {
         reservedAmountMinor: initiatorReserved + terms.amountMinor,
+        velocityUsage: initiatorUsage.velocityUsage,
         updatedAt: timestamp,
       });
       transaction.update(recipientMandateRef, {
         reservedAmountMinor: recipientReserved + terms.amountMinor,
+        velocityUsage: recipientUsage.velocityUsage,
         updatedAt: timestamp,
       });
       transaction.update(negotiationRef, {
@@ -322,6 +329,10 @@ export async function POST(request: Request, context: RouteContext) {
           : {}),
         status: 'accepted',
         acceptedAt: timestamp,
+        reservationUsageWindowKeys: {
+          initiator: initiatorUsage.usageWindowKeys,
+          recipient: recipientUsage.usageWindowKeys,
+        },
         resolvedByAgentId: uid,
         eventCount,
         updatedAt: timestamp,

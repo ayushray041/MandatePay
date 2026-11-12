@@ -7,12 +7,31 @@ import { formatContract } from '@/lib/contracts/format';
 import {
   assertContractTermsAuthorized,
   assertRequiredApprover,
+  contractReservationUsageWindowKeys,
 } from '@/lib/contracts/policy';
 import { getServerTimestamp } from '@/lib/firebase/firestore';
+import { releaseMandateVelocityUsage } from '@/lib/mandates/policy';
 import { contractTermsSchema, contractApprovalSchema } from '@/models/contract';
 
 type RouteContext = { params: Promise<{ contractId: string }> };
 type StoredData = Record<string, unknown>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function usageWindowKeys(value: unknown): { daily?: string; weekly?: string; monthly?: string } | undefined {
+  if (!isRecord(value)) {
+    return undefined;
+  }
+  const keys: { daily?: string; weekly?: string; monthly?: string } = {};
+  for (const window of ['daily', 'weekly', 'monthly'] as const) {
+    if (typeof value[window] === 'string') {
+      keys[window] = value[window] as string;
+    }
+  }
+  return keys;
+}
 
 export async function POST(request: Request, context: RouteContext) {
   const authentication = await authenticateRequest(request);
@@ -117,12 +136,31 @@ export async function POST(request: Request, context: RouteContext) {
         ) {
           throw new ContractError(409, 'INVALID_RESERVATION', 'The accepted negotiation reservation is unavailable.');
         }
+        const usageKeys = isRecord(contract.reservationUsageWindowKeys)
+          ? contract.reservationUsageWindowKeys
+          : {};
+        const firstUsageKeys = usageWindowKeys(usageKeys.initiator);
+        const secondUsageKeys = usageWindowKeys(usageKeys.recipient);
         transaction.update(firestore.collection('mandates').doc(String(mandateIds[0])), {
           reservedAmountMinor: firstReserved - termsResult.data.amountMinor,
+          ...(firstUsageKeys ? {
+            velocityUsage: releaseMandateVelocityUsage(
+              firstMandate,
+              termsResult.data.amountMinor,
+              firstUsageKeys,
+            ),
+          } : {}),
           updatedAt: timestamp,
         });
         transaction.update(firestore.collection('mandates').doc(String(mandateIds[1])), {
           reservedAmountMinor: secondReserved - termsResult.data.amountMinor,
+          ...(secondUsageKeys ? {
+            velocityUsage: releaseMandateVelocityUsage(
+              secondMandate,
+              termsResult.data.amountMinor,
+              secondUsageKeys,
+            ),
+          } : {}),
           updatedAt: timestamp,
         });
         transaction.update(contractRef, {
@@ -157,6 +195,7 @@ export async function POST(request: Request, context: RouteContext) {
         termsResult.data.amountMinor,
         'contract.create',
         now,
+        contractReservationUsageWindowKeys(contract.reservationUsageWindowKeys),
       );
       const nextApprovals = [...approvals, uid];
       const activated = requiredApproverIds.every((approverId) => nextApprovals.includes(approverId));

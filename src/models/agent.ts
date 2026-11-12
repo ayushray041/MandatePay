@@ -1,18 +1,8 @@
 import { z } from 'zod';
 import { mandateCurrencySchema } from '@/models/mandate';
+import { agentCategories, agentCategorySchema } from '@/models/agent-category';
 
-export const agentCategories = [
-  'software',
-  'design',
-  'writing',
-  'marketing',
-  'consulting',
-  'finance',
-  'legal',
-  'other',
-] as const;
-
-export const agentCategorySchema = z.enum(agentCategories);
+export { agentCategories, agentCategorySchema } from '@/models/agent-category';
 
 const agentProfileFieldsSchema = z.object({
   headline: z.string().trim().min(3).max(120),

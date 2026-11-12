@@ -73,21 +73,43 @@ export async function POST(request: Request, context: RouteContext) {
           throw new MandateError(409, 'INVALID_LIMIT_REQUEST', 'Pending spending-limit request is invalid.');
         }
         if (
-          mandate.executionConditions?.maximumOperationAmountMinor !== undefined
-          && mandate.executionConditions.maximumOperationAmountMinor > requestedLimitMinor
+          typeof mandate.executionConditions === 'object'
+          && mandate.executionConditions !== null
+          && Object.entries(mandate.executionConditions).some(([field, amount]) =>
+            field.endsWith('Minor') && typeof amount === 'number' && amount > requestedLimitMinor)
         ) {
           throw new MandateError(
             409,
             'INVALID_LIMIT_REQUEST',
-            'Requested limit is below the per-operation maximum.',
+            'Requested limit is below an execution-condition spending cap.',
           );
         }
 
-        transaction.update(mandateRef, {
+        const currentVersion = Number(mandate.version ?? 1);
+        if (!Number.isSafeInteger(currentVersion) || currentVersion < 1) {
+          throw new MandateError(500, 'INVALID_MANDATE', 'Mandate version is invalid.');
+        }
+        const nextVersion = currentVersion + 1;
+        const timestamp = getServerTimestamp();
+        const changes = {
           spendingLimitMinor: requestedLimitMinor,
           pendingLimitRequest: null,
-          updatedAt: getServerTimestamp(),
+          version: nextVersion,
+          updatedAt: timestamp,
+        };
+        transaction.update(mandateRef, {
+          ...changes,
         });
+        transaction.create(
+          mandateRef.collection('versions').doc(String(nextVersion).padStart(6, '0')),
+          {
+            version: nextVersion,
+            createdBy: authentication.user.uid,
+            createdAt: timestamp,
+            reason: 'Spending-limit increase approved.',
+            snapshot: { ...mandate, ...changes },
+          },
+        );
       } else {
         transaction.update(mandateRef, {
           pendingLimitRequest: null,

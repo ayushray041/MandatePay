@@ -1,7 +1,10 @@
 import { timestampToIso } from '@/lib/mandates/format';
 import { assertExecutionAllowed } from '@/lib/mandates/policy';
 import { MandateError } from '@/lib/mandates/errors';
-import { contractExpiryStatus } from '@/lib/contracts/policy';
+import {
+  contractExpiryStatus,
+  contractReservationUsageWindowKeys,
+} from '@/lib/contracts/policy';
 import { PaymentError } from '@/lib/payments/errors';
 import type { ContractTerms } from '@/models/contract';
 
@@ -15,14 +18,15 @@ function assertActiveMandate(
 ): void {
   const start = timestampToIso(mandate.startsAt);
   const expiry = timestampToIso(mandate.expiresAt);
+  const permanent = mandate.durationType === 'permanent' && mandate.expiresAt == null;
   if (
     mandate.ownerId !== ownerId
     || mandate.authorizedAgentId !== agentId
     || mandate.status !== 'active'
     || !start
-    || !expiry
+    || (!expiry && !permanent)
     || Date.parse(start) > now.getTime()
-    || Date.parse(expiry) <= now.getTime()
+    || (expiry !== null && Date.parse(expiry) <= now.getTime())
   ) {
     throw new PaymentError(
       409,
@@ -128,6 +132,18 @@ export function assertPaymentInitiationAllowed(input: {
       terms.amountMinor,
       `${terms.service.title} ${terms.service.description}`,
       now,
+      {
+        enforceVelocity: true,
+        serviceCategory: terms.service.category,
+        contractDurationDays: Math.max(
+          1,
+          Math.ceil((Date.parse(terms.expiresAt) - now.getTime()) / 86_400_000),
+        ),
+        excludeVelocityReservationAmountMinor: terms.amountMinor,
+        excludeVelocityUsageWindowKeys: contractReservationUsageWindowKeys(
+          contract.reservationUsageWindowKeys,
+        )?.[payerIndex],
+      },
     );
     if (requiresOwnerApproval && payer.userId !== uid) {
       throw new PaymentError(

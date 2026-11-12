@@ -44,19 +44,31 @@ from that token. Amounts are integer currency minor units.
 | Method | Path | Request | Response / notes |
 |--------|------|---------|------------------|
 | GET | `/api/mandates` | – | Lists mandates owned by or assigned to the caller. |
-| POST | `/api/mandates` | Mandate definition | Creates a draft owned by the caller. The authorized agent must have a profile. |
+| POST | `/api/mandates` | Mandate definition | Creates a draft owned by the caller. The authorized agent and every configured approver must have a profile; the caller must be an approver and the assigned agent cannot approve its own operations. |
 | GET | `/api/mandates/:mandateId` | – | Owner- or assigned-agent-only detail. |
-| PATCH | `/api/mandates/:mandateId` | Partial mandate definition | Owner-only draft editing. Limit increases are rejected; reductions cannot undercut committed spend and reservations. |
-| POST | `/api/mandates/:mandateId/lifecycle` | `{ action: "activate" \| "pause" \| "resume" \| "revoke" }` | Owner-only lifecycle transition; revocation is irreversible. |
+| PATCH | `/api/mandates/:mandateId` | Partial mandate definition | Owner-only draft editing. Includes permanent/temporary dates, limits, currency, vendor/category/country restrictions, approval policy, and conditional rules. Limit increases are rejected; reductions cannot undercut committed spend and reservations. Each policy edit writes an immutable version. |
+| POST | `/api/mandates/:mandateId/duplicate` | `{ title? }` | Owner-only copy as a new draft with reset utilization/reservations and a new version history. |
+| GET | `/api/mandates/:mandateId/versions` | – | Owner/assigned-agent-only immutable version history, capped at 50 entries. |
+| POST | `/api/mandates/:mandateId/lifecycle` | `{ action: "activate" \| "pause" \| "resume" \| "revoke" }` or `{ action: "emergency_suspend", reason }` | Owner-only lifecycle transition. Revocation is irreversible and refuses outstanding reservations; emergency suspension pauses authority and invalidates pending authorization versions. |
 | POST | `/api/mandates/:mandateId/limit-requests` | `{ requestedLimitMinor, reason }` | Assigned-agent request for a limit increase. |
 | POST | `/api/mandates/:mandateId/limit-requests/decision` | `{ decision: "approve" \| "reject" }` | Owner decision on the pending increase. |
+| POST | `/api/mandates/:mandateId/renewal` | `{ requestedExpiresAt, reason }` | Assigned-agent request to extend a temporary mandate. Does not change spending or execution permissions. |
+| PATCH | `/api/mandates/:mandateId/renewal` | `{ decision: "approve" \| "reject", reason? }` | Owner decision; rejection requires a reason. Approval extends expiry and creates a new version. |
 | GET | `/api/mandates/:mandateId/authorizations` | – | Lists operation authorizations for the owner and assigned agent. |
-| POST | `/api/mandates/:mandateId/authorizations` | `{ operation, amountMinor, description }` | Enforces active status, dates, allowed operations, budget, approvals, and execution conditions transactionally. |
-| PATCH | `/api/mandates/:mandateId/authorizations/:authorizationId` | `{ decision: "approve" \| "reject" }` | Owner decision; approved amounts are committed against the budget transactionally. |
+| POST | `/api/mandates/:mandateId/authorizations` | `{ operation, amountMinor, description, idempotencyKey? }` | Enforces mandate version, status, dates, allowed operations, total/agent/period limits, transaction count, approvals, and conditions transactionally. Pending approvals reserve budget immediately. An idempotency key makes retries safe. |
+| PATCH | `/api/mandates/:mandateId/authorizations/:authorizationId` | `{ decision: "approve" \| "reject" }` | A configured approver records one vote. All-approver or quorum policy applies; final approval revalidates the captured mandate version and all rules. Rejection, stale policy, or expired authority releases reservations atomically. |
 
 An approved operation authorization records permission and commits budget only; it does not claim
-that a contract, payment, or external operation has executed. Mandate mutations and operation
-decisions create immutable server-side audit events.
+that a contract, payment, or external operation has executed. Daily, ISO-weekly, monthly, and
+configured recurring limits roll over on UTC boundaries. The creation form provides general,
+time-boxed project, and recurring-service templates; templates are only prefills and never bypass
+server validation.
+
+Geography, allowed/blocked vendor, allowed category, and contract-duration rules are enforced only
+when the server has trusted context. Client-provided vendor identity, category, country, or duration
+is not accepted as authorization evidence. The standalone operation-authorization endpoint fails
+closed when one of these configured conditions cannot be verified. No trusted geolocation provider
+or scheduled expiry worker is currently configured; expiry is enforced on access/authorization.
 
 ### Negotiations
 

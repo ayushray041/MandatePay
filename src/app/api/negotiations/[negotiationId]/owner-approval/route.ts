@@ -2,6 +2,7 @@ import { adminFirestore } from '@/lib/firebase/admin';
 import { authenticateRequest } from '@/lib/api/auth';
 import { apiError, apiSuccess } from '@/lib/api/responses';
 import { getServerTimestamp } from '@/lib/firebase/firestore';
+import { addMandateVelocityUsage } from '@/lib/mandates/policy';
 import { NegotiationError, negotiationErrorResponse } from '@/lib/negotiations/errors';
 import { writeNegotiationEvent } from '@/lib/negotiations/events';
 import { formatNegotiationForViewer } from '@/lib/negotiations/format';
@@ -9,7 +10,7 @@ import {
   assertMandateActive,
   assertOfferWithinMandate,
   isNegotiationExpired,
-  requiredOwnerApprovalIds,
+  requiredOwnerApprovalGroups,
 } from '@/lib/negotiations/policy';
 import {
   negotiationOfferTermsSchema,
@@ -19,6 +20,42 @@ import {
 
 type RouteContext = { params: Promise<{ negotiationId: string }> };
 type StoredData = Record<string, unknown>;
+type ApprovalGroup = { approverIds: string[]; quorum: number };
+
+function parseApprovalGroups(value: unknown): ApprovalGroup[] | null {
+  if (!Array.isArray(value)) {
+    return null;
+  }
+  const groups: ApprovalGroup[] = [];
+  for (const item of value) {
+    if (
+      typeof item !== 'object'
+      || item === null
+      || !('approverIds' in item)
+      || !('quorum' in item)
+      || !Array.isArray(item.approverIds)
+      || !item.approverIds.every((id: unknown) => typeof id === 'string')
+      || typeof item.quorum !== 'number'
+      || !Number.isSafeInteger(item.quorum)
+      || item.quorum < 1
+      || item.quorum > item.approverIds.length
+    ) {
+      return null;
+    }
+    groups.push({
+      approverIds: item.approverIds,
+      quorum: item.quorum,
+    });
+  }
+  return groups;
+}
+
+function approvalGroupsMatch(left: ApprovalGroup[], right: ApprovalGroup[]): boolean {
+  const normalize = (groups: ApprovalGroup[]) => groups
+    .map((group) => `${[...group.approverIds].sort().join(',')}:${group.quorum}`)
+    .sort();
+  return JSON.stringify(normalize(left)) === JSON.stringify(normalize(right));
+}
 
 export async function POST(request: Request, context: RouteContext) {
   const authentication = await authenticateRequest(request);
@@ -67,6 +104,12 @@ export async function POST(request: Request, context: RouteContext) {
       }
       const requiredOwners = storedRequiredOwners as string[];
       const approvals = storedApprovals as string[];
+      const storedGroups = negotiation.requiredOwnerApprovalGroups === undefined
+        ? requiredOwners.map((ownerId) => ({ approverIds: [ownerId], quorum: 1 }))
+        : parseApprovalGroups(negotiation.requiredOwnerApprovalGroups);
+      if (!storedGroups || storedGroups.length === 0) {
+        throw new NegotiationError(500, 'INVALID_NEGOTIATION', 'Owner approval quorum data is invalid.');
+      }
       if (
         new Set(requiredOwners).size !== requiredOwners.length
         || new Set(approvals).size !== approvals.length
@@ -178,14 +221,16 @@ export async function POST(request: Request, context: RouteContext) {
         throw new NegotiationError(500, 'INVALID_OFFER', 'Offer author is not a negotiation participant.');
       }
 
-      const currentRequiredOwners = requiredOwnerApprovalIds(
+      const currentGroups = requiredOwnerApprovalGroups(
         [initiatorMandate, recipientMandate],
         terms,
         now,
       );
+      const currentRequiredOwners = [...new Set(currentGroups.flatMap((group) => group.approverIds))];
       if (
         currentRequiredOwners.length !== requiredOwners.length
         || currentRequiredOwners.some((ownerId) => !requiredOwners.includes(ownerId))
+        || !approvalGroupsMatch(currentGroups, storedGroups)
       ) {
         throw new NegotiationError(409, 'APPROVAL_REQUIREMENTS_CHANGED', 'Mandate owner approval requirements have changed.');
       }
@@ -218,7 +263,8 @@ export async function POST(request: Request, context: RouteContext) {
       }
 
       const nextApprovals = [...approvals, uid];
-      const fullyApproved = requiredOwners.every((ownerId) => nextApprovals.includes(ownerId));
+      const fullyApproved = currentGroups.every((group) =>
+        group.approverIds.filter((ownerId) => nextApprovals.includes(ownerId)).length >= group.quorum);
       const nextEventCount = eventCount + (fullyApproved ? 2 : 1);
       transaction.update(negotiationRef, {
         ownerApprovals: nextApprovals,
@@ -251,13 +297,23 @@ export async function POST(request: Request, context: RouteContext) {
         ) {
           throw new NegotiationError(500, 'INVALID_MANDATE', 'Mandate reservation data is invalid.');
         }
+        const initiatorUsage = addMandateVelocityUsage(initiatorMandate, terms.amountMinor, now);
+        const recipientUsage = addMandateVelocityUsage(recipientMandate, terms.amountMinor, now);
         transaction.update(initiatorMandateRef, {
           reservedAmountMinor: initiatorReserved + terms.amountMinor,
+          velocityUsage: initiatorUsage.velocityUsage,
           updatedAt: timestamp,
         });
         transaction.update(recipientMandateRef, {
           reservedAmountMinor: recipientReserved + terms.amountMinor,
+          velocityUsage: recipientUsage.velocityUsage,
           updatedAt: timestamp,
+        });
+        transaction.update(negotiationRef, {
+          reservationUsageWindowKeys: {
+            initiator: initiatorUsage.usageWindowKeys,
+            recipient: recipientUsage.usageWindowKeys,
+          },
         });
         writeNegotiationEvent(transaction, negotiationRef, {
           sequence: eventCount + 2,

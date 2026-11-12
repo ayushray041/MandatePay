@@ -55,4 +55,40 @@ describe('mandate schemas', () => {
     expect(mandateUpdateSchema.safeParse({}).success).toBe(false);
     expect(mandateUpdateSchema.safeParse({ status: 'active' }).success).toBe(false);
   });
+
+  it('validates permanent terms, quorum membership, recurring limits, and mutually exclusive allow/deny lists', () => {
+    expect(mandateCreateSchema.safeParse({
+      ...validMandate,
+      durationType: 'permanent',
+      expiresAt: null,
+    }).success).toBe(true);
+    expect(mandateCreateSchema.safeParse({
+      ...validMandate,
+      durationType: 'permanent',
+    }).success).toBe(false);
+    expect(mandateCreateSchema.safeParse({
+      ...validMandate,
+      approvalRequirements: {
+        ownerApprovalOperations: [],
+        approverIds: ['owner', 'reviewer'],
+        approvalMode: 'quorum',
+        approvalQuorum: 3,
+      },
+    }).success).toBe(false);
+    expect(mandateCreateSchema.safeParse({
+      ...validMandate,
+      executionConditions: {
+        recurringPeriod: 'monthly',
+        requiredDescriptionTerms: [],
+      },
+    }).success).toBe(false);
+    expect(mandateCreateSchema.safeParse({
+      ...validMandate,
+      executionConditions: {
+        allowedVendorIds: ['vendor-a'],
+        blockedVendorIds: ['vendor-a'],
+        requiredDescriptionTerms: [],
+      },
+    }).success).toBe(false);
+  });
 });

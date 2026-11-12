@@ -7,8 +7,13 @@ import { formatContractAmendment } from '@/lib/contracts/format';
 import {
   assertContractTermsAuthorized,
   assertRequiredApprover,
+  contractReservationUsageWindowKeys,
 } from '@/lib/contracts/policy';
 import { getServerTimestamp } from '@/lib/firebase/firestore';
+import {
+  addMandateVelocityUsage,
+  releaseMandateVelocityUsage,
+} from '@/lib/mandates/policy';
 import {
   amendmentDecisionSchema,
   contractTermsSchema,
@@ -170,6 +175,7 @@ export async function POST(request: Request, context: RouteContext) {
         currentTerms.amountMinor,
         'contract.amend',
         now,
+        contractReservationUsageWindowKeys(contract.reservationUsageWindowKeys),
       );
 
       if (!approved) {
@@ -214,12 +220,37 @@ export async function POST(request: Request, context: RouteContext) {
       ) {
         throw new ContractError(409, 'INVALID_RESERVATION', 'The amended amount cannot be reserved safely.');
       }
+      const reservationUsageKeys = contractReservationUsageWindowKeys(
+        contract.reservationUsageWindowKeys,
+      );
+      const firstVelocityUsage = addMandateVelocityUsage(
+        {
+          ...firstMandate,
+          velocityUsage: reservationUsageKeys?.[0]
+            ? releaseMandateVelocityUsage(firstMandate, oldAmount, reservationUsageKeys[0])
+            : firstMandate.velocityUsage,
+        },
+        newAmount,
+        now,
+      );
+      const secondVelocityUsage = addMandateVelocityUsage(
+        {
+          ...secondMandate,
+          velocityUsage: reservationUsageKeys?.[1]
+            ? releaseMandateVelocityUsage(secondMandate, oldAmount, reservationUsageKeys[1])
+            : secondMandate.velocityUsage,
+        },
+        newAmount,
+        now,
+      );
       transaction.update(firestore.collection('mandates').doc(String(mandateIds[0])), {
         reservedAmountMinor: firstReserved + newAmount - oldAmount,
+        velocityUsage: firstVelocityUsage.velocityUsage,
         updatedAt: timestamp,
       });
       transaction.update(firestore.collection('mandates').doc(String(mandateIds[1])), {
         reservedAmountMinor: secondReserved + newAmount - oldAmount,
+        velocityUsage: secondVelocityUsage.velocityUsage,
         updatedAt: timestamp,
       });
       transaction.create(nextVersionRef, {
@@ -243,6 +274,10 @@ export async function POST(request: Request, context: RouteContext) {
         activeAmendmentId: null,
         approvals: amendment.requiredApproverIds,
         expiresAt: new Date(proposedTerms.expiresAt),
+        reservationUsageWindowKeys: {
+          initiator: firstVelocityUsage.usageWindowKeys,
+          recipient: secondVelocityUsage.usageWindowKeys,
+        },
         eventCount: eventCount + 2,
         updatedAt: timestamp,
       });

@@ -25,6 +25,14 @@
       ]
     },
     {
+      "collectionGroup": "mandates",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "approvalRequirements.approverIds", "arrayConfig": "CONTAINS" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "contracts",
       "queryScope": "COLLECTION",
       "fields": [

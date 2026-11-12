@@ -7,7 +7,7 @@ import { MandateError, mandateErrorResponse } from '@/lib/mandates/errors';
 import { formatMandate, timestampToIso } from '@/lib/mandates/format';
 import {
   assertOwner,
-  assertOwnerOrAgent,
+  assertOwnerAgentOrApprover,
   mandateStatus,
 } from '@/lib/mandates/policy';
 import {
@@ -31,6 +31,7 @@ function editableMandate(data: FirebaseFirestore.DocumentData) {
     authorizedAgentId: data.authorizedAgentId,
     spendingLimitMinor: data.spendingLimitMinor,
     currency: data.currency,
+    durationType: data.durationType ?? 'temporary',
     startsAt: timestampToIso(data.startsAt),
     expiresAt: timestampToIso(data.expiresAt),
     allowedOperations: data.allowedOperations,
@@ -61,7 +62,7 @@ export async function GET(request: Request, context: RouteContext) {
       throw new Error('Mandate document has no data.');
     }
 
-    assertOwnerOrAgent(data, authentication.user.uid);
+    assertOwnerAgentOrApprover(data, authentication.user.uid);
     return apiSuccess(formatMandate(snapshot.id, data));
   } catch (error: unknown) {
     if (error instanceof MandateError) {
@@ -149,16 +150,26 @@ export async function PATCH(request: Request, context: RouteContext) {
         );
       }
 
-      if (
-        parsed.data.spendingLimitMinor !== undefined
-        && parsed.data.spendingLimitMinor
-          < current.spentAmountMinor + (current.reservedAmountMinor ?? 0)
-      ) {
-        throw new MandateError(
-          409,
-          'LIMIT_BELOW_COMMITTED_SPEND',
-          'Spending limit cannot be lower than authorized spend plus accepted negotiation reservations.',
-        );
+      if (parsed.data.spendingLimitMinor !== undefined) {
+        const committedAmounts = [
+          current.spentAmountMinor,
+          current.reservedAmountMinor ?? 0,
+          current.authorizationReservedAmountMinor ?? 0,
+        ];
+        if (committedAmounts.some((amount) =>
+          typeof amount !== 'number' || !Number.isSafeInteger(amount) || amount < 0)) {
+          throw new MandateError(500, 'INVALID_MANDATE', 'Mandate spend and reservation data is invalid.');
+        }
+        if (
+          parsed.data.spendingLimitMinor
+          < committedAmounts.reduce((total, amount) => total + Number(amount), 0)
+        ) {
+          throw new MandateError(
+            409,
+            'LIMIT_BELOW_COMMITTED_SPEND',
+            'Spending limit cannot be lower than committed spend plus outstanding reservations.',
+          );
+        }
       }
 
       if (
@@ -177,13 +188,60 @@ export async function PATCH(request: Request, context: RouteContext) {
         throw new MandateError(400, 'INVALID_ARGUMENT', 'Combined mandate fields are invalid.');
       }
 
-      const changes = {
+      const approvalRequirements = merged.data.approvalRequirements;
+      const approverIds = approvalRequirements.approverIds ?? [current.ownerId];
+      if (
+        !approverIds.includes(current.ownerId)
+        || approverIds.includes(current.authorizedAgentId)
+      ) {
+        throw new MandateError(
+          422,
+          'INVALID_APPROVERS',
+          'The mandate owner must be an approver and the authorized agent cannot approve their own operations.',
+        );
+      }
+      if (parsed.data.approvalRequirements?.approverIds) {
+        const approverSnapshots = await Promise.all(
+          parsed.data.approvalRequirements.approverIds.map((userId) =>
+            transaction.get(firestore.collection('users').doc(userId))),
+        );
+        if (approverSnapshots.some((approver) => !approver.exists)) {
+          throw new MandateError(
+            422,
+            'INVALID_APPROVERS',
+            'Every approver must have a registered user profile.',
+          );
+        }
+      }
+
+      const currentVersion = Number(current.version ?? 1);
+      if (!Number.isSafeInteger(currentVersion) || currentVersion < 1) {
+        throw new MandateError(500, 'INVALID_MANDATE', 'Mandate version is invalid.');
+      }
+      const nextVersion = currentVersion + 1;
+      const changes: Record<string, unknown> = {
         ...parsed.data,
         ...(parsed.data.startsAt ? { startsAt: new Date(parsed.data.startsAt) } : {}),
-        ...(parsed.data.expiresAt ? { expiresAt: new Date(parsed.data.expiresAt) } : {}),
+        ...(parsed.data.expiresAt !== undefined
+          ? { expiresAt: parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null }
+          : {}),
+        ...(parsed.data.approvalRequirements
+          ? { approvalRequirements: { ...approvalRequirements, approverIds } }
+          : {}),
+        version: nextVersion,
         updatedAt: getServerTimestamp(),
       };
       transaction.update(mandateRef, changes);
+      transaction.create(
+        mandateRef.collection('versions').doc(String(nextVersion).padStart(6, '0')),
+        {
+          version: nextVersion,
+          createdBy: authentication.user.uid,
+          createdAt: getServerTimestamp(),
+          reason: 'Draft mandate updated.',
+          snapshot: { ...current, ...changes },
+        },
+      );
       writeMandateAuditEvent(firestore, transaction, {
         mandateId,
         action: 'mandate.updated',

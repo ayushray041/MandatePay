@@ -8,8 +8,9 @@ are accessed through authenticated server APIs only.
 |------------|-------------|-------------|---------|
 | `users` | Firebase `uid` | `uid`, `email`, `displayName`, `role`, `createdAt`, `updatedAt` | User profile created and updated by trusted API handlers. Self-service roles are `client` or `freelancer`. |
 | `agents` | Firebase `uid` | `uid`, `displayName`, `headline`, `bio`, `categories`, `capabilities`, `supportedCurrencies`, `availability`, timestamps | Registered freelancer identity and discovery capabilities. Does not contain email or mandate data. |
-| `mandates` | Auto ID | `ownerId`, `authorizedAgentId`, title and description, `spendingLimitMinor`, `spentAmountMinor`, `reservedAmountMinor`, currency, date window, allowed operations, approval requirements, execution conditions, lifecycle status, optional pending limit request, timestamps | Server-enforced spending authority. Only the owner and assigned agent can access it through APIs. |
-| `mandateAuthorizations` | Auto ID | `mandateId`, `ownerId`, `authorizedAgentId`, operation, amount, currency, description, status, timestamps | Operation authorization requests and owner decisions. Direct client access is denied. |
+| `mandates` | Auto ID | `ownerId`, one `authorizedAgentId`, title and description, `durationType`, `startsAt`, nullable `expiresAt`, `spendingLimitMinor`, `spentAmountMinor`, negotiation `reservedAmountMinor`, pending-approval `authorizationReservedAmountMinor`, `velocityUsage`, currency, allowed operations, approval requirements (approver IDs, all/quorum), execution conditions, lifecycle/version, emergency suspension, renewal request, optional pending limit request, timestamps | Server-enforced spending authority. Budget and velocity counters are mutated transactionally; only the owner and assigned agent can access it through APIs. |
+| `mandates/{id}/versions` | Zero-padded version number | `version`, `createdBy`, `createdAt`, `reason`, complete `snapshot` | Append-only mandate policy/lifecycle snapshots. Direct client access is denied. |
+| `mandateAuthorizations` | Auto ID or SHA-256 idempotency key | `mandateId`, owner and assigned-agent IDs, operation, amount, currency, description, captured `mandateVersion`, approver IDs/quorum/approvals, pending reservation window keys, status, idempotency fingerprint, timestamps | Operation authorization requests and decisions. Pending requests reserve both total and UTC velocity budget transactionally; retries with the same idempotency key do not create duplicate reservations. Direct client access is denied. |
 | `auditLogs` | Auto ID | `entity`, `entityId`, `action`, `performedBy`, `payload`, `timestamp` | Immutable server-side mandate audit events. |
 | `negotiations` | Auto ID | `initiatorAgentId`, `recipientAgentId`, `initiatorMandateId`, nullable `recipientMandateId`, title, lifecycle status, expiry, current offer snapshot and ID, `requiredOwnerApprovalIds`, `ownerApprovals`, optional acceptance requester, `offerCount`, `eventCount`, resolution fields, timestamps | Private bilateral negotiation state. The recipient mandate is bound on the recipient's first counteroffer or acceptance. |
 | `negotiations/{id}/offers` | Auto ID | `negotiationId`, sequence, `submittedByAgentId`, `mandateId`, terms, `createdAt` | Append-only offer and counteroffer history. Terms contain title, category, description, amount in integer minor units, currency, and delivery days. |
@@ -32,11 +33,24 @@ mandate capacity and are not an execution or payment record.
 Negotiation intelligence and contract analysis are stateless: requests use existing participant and
 contract-version records, and prompts/model responses are not persisted in Firestore.
 
+Mandate daily, ISO-weekly, monthly, and recurring usage windows are computed in UTC. Pending
+operation approvals and accepted negotiations count against the applicable budget windows. Rejected
+operation approvals and rejected contracts release their reservations transactionally. Mandate
+version snapshots are written for creation, policy/lifecycle changes, limit increases, renewal, and
+access-triggered expiry.
+
+Mandate expiry is enforced on reads and authorization; a lifecycle access after the date marks the
+record expired. There is no scheduled expiry worker. Permanent mandates have `expiresAt: null`.
+Geographic, vendor, category, and contract-duration restrictions require trusted server-side
+execution context; when that context is not available, authorization fails closed rather than
+accepting client-provided identity or location.
+
 ### Indexes
 
 `firestore.indexes.json` defines the composite indexes used for:
 
 - Mandate listing by `ownerId` or `authorizedAgentId`, ordered by `createdAt`.
+- Mandate approval inbox listing by `approvalRequirements.approverIds` and `createdAt`.
 - Authorization listing by `mandateId`, ordered by `createdAt`.
 - Contract listing by `ownerId`, ordered by `createdAt`.
 - Agent discovery by category and `updatedAt`.

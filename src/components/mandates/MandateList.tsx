@@ -21,7 +21,7 @@ function spendingPercent(mandate: MandateRecord): number {
   return Math.min(
     100,
     Math.round(
-      ((mandate.spentAmountMinor + mandate.reservedAmountMinor)
+      ((mandate.spentAmountMinor + mandate.reservedAmountMinor + mandate.authorizationReservedAmountMinor)
         / mandate.spendingLimitMinor) * 100,
     ),
   );
@@ -121,6 +121,9 @@ export function MandateList() {
           {mandates.map((mandate) => {
             const percent = spendingPercent(mandate);
             const isOwner = mandate.ownerId === user?.uid;
+            const isAgent = mandate.authorizedAgentId === user?.uid;
+            const isApprover = user?.uid !== undefined
+              && mandate.approvalRequirements.approverIds?.includes(user.uid) === true;
 
             return (
               <article
@@ -135,7 +138,7 @@ export function MandateList() {
                         {mandate.status}
                       </span>
                       <span className="text-xs text-mp-medium-grey">
-                        {isOwner ? 'Owned by you' : 'Assigned to you'}
+                        {isOwner ? 'Owned by you' : isAgent ? 'Assigned to you' : isApprover ? 'Approval access' : 'Mandate access'}
                       </span>
                     </div>
                     <p className="mp-copy mt-2 line-clamp-2">{mandate.description}</p>
@@ -148,7 +151,7 @@ export function MandateList() {
                   </Link>
                 </div>
 
-                <div className="mt-5 grid gap-4 border-t border-mp-warm-grey pt-4 sm:grid-cols-4">
+                <div className="mt-5 grid gap-4 border-t border-mp-warm-grey pt-4 sm:grid-cols-5">
                   <div>
                     <p className="mp-kicker">Spending authority</p>
                     <p className="mt-1 font-semibold">
@@ -165,6 +168,12 @@ export function MandateList() {
                     <p className="mp-kicker">Reserved</p>
                     <p className="mt-1 font-semibold">
                       {formatMinorAmount(mandate.reservedAmountMinor, mandate.currency)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="mp-kicker">Pending approvals</p>
+                    <p className="mt-1 font-semibold">
+                      {formatMinorAmount(mandate.authorizationReservedAmountMinor, mandate.currency)}
                     </p>
                   </div>
                   <div>
@@ -187,7 +196,7 @@ export function MandateList() {
                 <p className="mt-3 text-xs text-mp-medium-grey">
                   {mandate.expiresAt
                     ? `Expires ${new Date(mandate.expiresAt).toLocaleDateString()}`
-                    : 'Expiry date unavailable'}
+                    : mandate.durationType === 'permanent' ? 'Permanent mandate' : 'Expiry date unavailable'}
                 </p>
               </article>
             );

@@ -6,9 +6,11 @@ import { getIdToken } from '@/lib/firebase/auth-client';
 import {
   mandateAuthorizationRecordSchema,
   mandateRecordSchema,
+  mandateVersionRecordSchema,
   type MandateAuthorizationRecord,
   type MandateCreateInput,
   type MandateRecord,
+  type MandateVersionRecord,
 } from '@/models/mandate';
 
 async function mandateRequest<T extends z.ZodType>(
@@ -83,14 +85,68 @@ export async function updateMandate(
 
 export async function performMandateAction(
   mandateId: string,
-  action: 'activate' | 'pause' | 'resume' | 'revoke',
+  action: 'activate' | 'pause' | 'resume' | 'revoke' | 'emergency_suspend',
+  reason?: string,
 ): Promise<MandateRecord> {
   return mandateRequest(
     `/api/mandates/${encodeURIComponent(mandateId)}/lifecycle`,
     mandateRecordSchema,
     {
       method: 'POST',
-      body: JSON.stringify({ action }),
+      body: JSON.stringify({ action, ...(reason ? { reason } : {}) }),
+    },
+  );
+}
+
+export async function duplicateMandate(
+  mandateId: string,
+  title?: string,
+): Promise<MandateRecord> {
+  return mandateRequest(
+    `/api/mandates/${encodeURIComponent(mandateId)}/duplicate`,
+    mandateRecordSchema,
+    {
+      method: 'POST',
+      body: JSON.stringify(title ? { title } : {}),
+    },
+  );
+}
+
+export async function listMandateVersions(
+  mandateId: string,
+): Promise<MandateVersionRecord[]> {
+  return mandateRequest(
+    `/api/mandates/${encodeURIComponent(mandateId)}/versions`,
+    z.array(mandateVersionRecordSchema),
+  );
+}
+
+export async function requestMandateRenewal(
+  mandateId: string,
+  requestedExpiresAt: string,
+  reason: string,
+): Promise<void> {
+  await mandateRequest(
+    `/api/mandates/${encodeURIComponent(mandateId)}/renewal`,
+    mandateRecordSchema,
+    {
+      method: 'POST',
+      body: JSON.stringify({ requestedExpiresAt, reason }),
+    },
+  );
+}
+
+export async function decideMandateRenewal(
+  mandateId: string,
+  decision: 'approve' | 'reject',
+  reason?: string,
+): Promise<void> {
+  await mandateRequest(
+    `/api/mandates/${encodeURIComponent(mandateId)}/renewal`,
+    mandateRecordSchema,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ decision, ...(reason ? { reason } : {}) }),
     },
   );
 }
@@ -128,7 +184,12 @@ export async function decideMandateLimitIncrease(
 
 export async function createMandateAuthorization(
   mandateId: string,
-  request: { operation: string; amountMinor: number; description: string },
+  request: {
+    operation: string;
+    amountMinor: number;
+    description: string;
+    idempotencyKey?: string;
+  },
 ): Promise<void> {
   await mandateRequest(
     `/api/mandates/${encodeURIComponent(mandateId)}/authorizations`,

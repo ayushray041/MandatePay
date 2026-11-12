@@ -1,6 +1,10 @@
 import { NegotiationError } from '@/lib/negotiations/errors';
 import { MandateError } from '@/lib/mandates/errors';
-import { assertExecutionAllowed } from '@/lib/mandates/policy';
+import {
+  assertExecutionAllowed,
+  getMandateApprovalQuorum,
+  getMandateApprovers,
+} from '@/lib/mandates/policy';
 import { timestampToIso } from '@/lib/mandates/format';
 import type { NegotiationOfferTerms } from '@/models/negotiation';
 
@@ -52,13 +56,14 @@ export function assertMandateActive(
 
   const startsAt = timestampToIso(mandate.startsAt);
   const expiresAt = timestampToIso(mandate.expiresAt);
-  if (!startsAt || !expiresAt) {
+  const permanent = mandate.durationType === 'permanent' && mandate.expiresAt == null;
+  if (!startsAt || (!expiresAt && !permanent)) {
     throw new NegotiationError(500, 'INVALID_MANDATE', 'Mandate dates are invalid.');
   }
   if (Date.parse(startsAt) > now.getTime()) {
     throw new NegotiationError(409, 'MANDATE_NOT_STARTED', 'The mandate is not yet active.');
   }
-  if (Date.parse(expiresAt) <= now.getTime()) {
+  if (expiresAt && Date.parse(expiresAt) <= now.getTime()) {
     throw new NegotiationError(410, 'MANDATE_EXPIRED', 'The mandate has expired.');
   }
   if (
@@ -117,6 +122,11 @@ export function assertTermsWithinMandate(
       terms.amountMinor,
       `${terms.title} ${terms.description}`,
       now,
+      {
+        enforceVelocity: true,
+        serviceCategory: terms.category,
+        contractDurationDays: terms.deliveryDays,
+      },
     );
   } catch (error: unknown) {
     if (error instanceof MandateError) {
@@ -135,19 +145,24 @@ export function requiredOwnerApprovalIds(
   terms: NegotiationOfferTerms,
   now: Date,
 ): string[] {
-  const approvalRequired = mandates.map((mandate) => (
-    assertTermsWithinMandate(mandate, terms, now)
-  ));
-  const ownerIds = mandates.flatMap((mandate, index) => {
-    if (!approvalRequired[index]) {
+  return [...new Set(requiredOwnerApprovalGroups(mandates, terms, now)
+    .flatMap((group) => group.approverIds))];
+}
+
+export function requiredOwnerApprovalGroups(
+  mandates: [StoredData, StoredData],
+  terms: NegotiationOfferTerms,
+  now: Date,
+): Array<{ approverIds: string[]; quorum: number }> {
+  return mandates.flatMap((mandate) => {
+    if (!assertTermsWithinMandate(mandate, terms, now)) {
       return [];
     }
-    if (typeof mandate.ownerId !== 'string' || !mandate.ownerId) {
-      throw new NegotiationError(500, 'INVALID_MANDATE', 'Mandate owner data is invalid.');
-    }
-    return [mandate.ownerId];
+    return [{
+      approverIds: getMandateApprovers(mandate),
+      quorum: getMandateApprovalQuorum(mandate),
+    }];
   });
-  return [...new Set(ownerIds)];
 }
 
 export function isNegotiationTerminal(status: unknown): boolean {

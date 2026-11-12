@@ -4,7 +4,10 @@ import { apiError, apiSuccess } from '@/lib/api/responses';
 import { ContractError, contractErrorResponse } from '@/lib/contracts/errors';
 import { writeContractEvent } from '@/lib/contracts/events';
 import { formatContract } from '@/lib/contracts/format';
-import { assertContractTermsAuthorized } from '@/lib/contracts/policy';
+import {
+  assertContractTermsAuthorized,
+  contractReservationUsageWindowKeys,
+} from '@/lib/contracts/policy';
 import { getServerTimestamp } from '@/lib/firebase/firestore';
 import { timestampToIso } from '@/lib/mandates/format';
 import { negotiationOfferTermsSchema } from '@/models/negotiation';
@@ -171,13 +174,17 @@ export async function POST(request: Request) {
       const mandateExpiries = [
         timestampToIso(initiatorMandate.expiresAt),
         timestampToIso(recipientMandate.expiresAt),
-      ];
-      if (!mandateExpiries[0] || !mandateExpiries[1]) {
+      ].filter((expiry): expiry is string => expiry !== null);
+      if (
+        (!timestampToIso(initiatorMandate.expiresAt) && initiatorMandate.durationType !== 'permanent')
+        || (!timestampToIso(recipientMandate.expiresAt) && recipientMandate.durationType !== 'permanent')
+      ) {
         throw new ContractError(409, 'INVALID_MANDATE', 'Contract mandate expiry dates are invalid.');
       }
+      const fallbackContractExpiry = now.getTime() + currentTerms.data.deliveryDays * 86_400_000;
       const expiresAt = new Date(Math.min(
-        Date.parse(mandateExpiries[0]),
-        Date.parse(mandateExpiries[1]),
+        fallbackContractExpiry,
+        ...mandateExpiries.map(Date.parse),
       )).toISOString();
       const termsResult = contractTermsSchema.safeParse({
         parties,
@@ -209,6 +216,7 @@ export async function POST(request: Request) {
         terms.amountMinor,
         'contract.create',
         now,
+        contractReservationUsageWindowKeys(negotiation.reservationUsageWindowKeys),
       );
 
       const participantIds = [...new Set([
@@ -233,6 +241,7 @@ export async function POST(request: Request) {
         participantIds,
         requiredApproverIds: participantIds,
         mandateIds: [initiatorMandateId, recipientMandateId],
+        reservationUsageWindowKeys: negotiation.reservationUsageWindowKeys ?? null,
         status: 'pending_review',
         currentVersion: 1,
         currentVersionId: versionRef.id,
@@ -259,6 +268,7 @@ export async function POST(request: Request) {
         participantIds,
         requiredApproverIds: participantIds,
         mandateIds: [initiatorMandateId, recipientMandateId],
+        reservationUsageWindowKeys: negotiation.reservationUsageWindowKeys ?? null,
         status: 'pending_review',
         currentVersion: 1,
         currentVersionId: versionRef.id,

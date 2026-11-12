@@ -1,10 +1,34 @@
 import { ContractError } from '@/lib/contracts/errors';
 import { MandateError } from '@/lib/mandates/errors';
-import { assertExecutionAllowed } from '@/lib/mandates/policy';
+import {
+  assertExecutionAllowed,
+  parseMandateUsageWindowKeys,
+  type MandateUsageWindowKeys,
+} from '@/lib/mandates/policy';
 import { timestampToIso } from '@/lib/mandates/format';
 import type { ContractTerms } from '@/models/contract';
 
 type StoredData = Record<string, unknown>;
+
+export function contractReservationUsageWindowKeys(
+  value: unknown,
+): [
+  Partial<MandateUsageWindowKeys> | undefined,
+  Partial<MandateUsageWindowKeys> | undefined,
+] | undefined {
+  if (typeof value !== 'object' || value === null) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  const keys: [
+    Partial<MandateUsageWindowKeys> | undefined,
+    Partial<MandateUsageWindowKeys> | undefined,
+  ] = [
+    parseMandateUsageWindowKeys(record.initiator),
+    parseMandateUsageWindowKeys(record.recipient),
+  ];
+  return keys[0] || keys[1] ? keys : undefined;
+}
 
 export function assertContractParty(contract: StoredData, uid: string): void {
   if (!Array.isArray(contract.participantIds) || !contract.participantIds.includes(uid)) {
@@ -23,11 +47,48 @@ function assertMandateOperation(
   mandate: StoredData,
   operation: 'contract.create' | 'contract.amend',
   description: string,
+  amountMinor: number,
   now: Date,
+  context: {
+    serviceCategory: string;
+    contractDurationDays: number;
+    reservedAmountToReplace: number;
+    reservedUsageWindowKeys?: Partial<MandateUsageWindowKeys>;
+  },
 ): void {
   try {
-    assertExecutionAllowed(mandate, operation, 0, description, now);
+    const reservedAmountMinor = Number(mandate.reservedAmountMinor ?? 0);
+    if (
+      !Number.isSafeInteger(reservedAmountMinor)
+      || reservedAmountMinor < context.reservedAmountToReplace
+    ) {
+      throw new ContractError(409, 'INVALID_RESERVATION', 'The existing contract reservation is invalid.');
+    }
+    assertExecutionAllowed(
+      {
+        ...mandate,
+        reservedAmountMinor: reservedAmountMinor - context.reservedAmountToReplace,
+      },
+      operation,
+      amountMinor,
+      description,
+      now,
+      {
+        enforceVelocity: true,
+        serviceCategory: context.serviceCategory,
+        contractDurationDays: context.contractDurationDays,
+        ...(context.reservedUsageWindowKeys
+          ? {
+            excludeVelocityReservationAmountMinor: context.reservedAmountToReplace,
+            excludeVelocityUsageWindowKeys: context.reservedUsageWindowKeys,
+          }
+          : {}),
+      },
+    );
   } catch (error: unknown) {
+    if (error instanceof ContractError) {
+      throw error;
+    }
     if (error instanceof MandateError) {
       throw new ContractError(error.status, error.code, error.message);
     }
@@ -43,12 +104,20 @@ export function assertContractTermsAuthorized(
   previousAmountMinor: number,
   operation: 'contract.create' | 'contract.amend',
   now: Date,
+  reservationUsageWindowKeys?: [
+    Partial<MandateUsageWindowKeys> | undefined,
+    Partial<MandateUsageWindowKeys> | undefined,
+  ],
 ): void {
   const description = `${terms.service.title} ${terms.service.description}`;
   const expiresAt = Date.parse(terms.expiresAt);
   if (!Number.isFinite(expiresAt) || expiresAt <= now.getTime()) {
     throw new ContractError(409, 'CONTRACT_EXPIRED', 'Contract terms must expire in the future.');
   }
+  const contractDurationDays = Math.max(
+    1,
+    Math.ceil((expiresAt - now.getTime()) / 86_400_000),
+  );
 
   for (const index of [0, 1] as const) {
     const mandate = mandates[index];
@@ -56,10 +125,18 @@ export function assertContractTermsAuthorized(
     if (mandate.authorizedAgentId !== agentIds[index]) {
       throw new ContractError(409, 'MANDATE_AGENT_MISMATCH', 'Contract mandate assignment changed.');
     }
-    assertMandateOperation(mandate, operation, description, now);
+    assertMandateOperation(mandate, operation, description, terms.amountMinor, now, {
+      serviceCategory: terms.service.category,
+      contractDurationDays,
+      reservedAmountToReplace: previousAmountMinor,
+      reservedUsageWindowKeys: reservationUsageWindowKeys?.[index],
+    });
 
     const mandateExpiry = timestampToIso(mandate.expiresAt);
-    if (!mandateExpiry || expiresAt > Date.parse(mandateExpiry)) {
+    if (
+      !(mandate.durationType === 'permanent' && mandate.expiresAt == null)
+      && (!mandateExpiry || expiresAt > Date.parse(mandateExpiry))
+    ) {
       throw new ContractError(
         409,
         'CONTRACT_EXPIRY_EXCEEDS_MANDATE',

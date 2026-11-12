@@ -25,7 +25,7 @@ export async function GET(request: Request) {
 
   const { uid } = authentication.user;
   try {
-    const [owned, assigned] = await Promise.all([
+    const [owned, assigned, awaitingApproval] = await Promise.all([
       adminFirestore
         .collection('mandates')
         .where('ownerId', '==', uid)
@@ -36,10 +36,15 @@ export async function GET(request: Request) {
         .where('authorizedAgentId', '==', uid)
         .orderBy('createdAt', 'desc')
         .get(),
+      adminFirestore
+        .collection('mandates')
+        .where('approvalRequirements.approverIds', 'array-contains', uid)
+        .orderBy('createdAt', 'desc')
+        .get(),
     ]);
 
     const mandates = new Map(
-      [...owned.docs, ...assigned.docs].map((snapshot) => [
+      [...owned.docs, ...assigned.docs, ...awaitingApproval.docs].map((snapshot) => [
         snapshot.id,
         formatMandate(snapshot.id, snapshot.data()),
       ]),
@@ -96,19 +101,31 @@ export async function POST(request: Request) {
   const firestore = adminFirestore;
 
   try {
-    const agent = await firestore
-      .collection('users')
-      .doc(parsed.data.authorizedAgentId)
-      .get();
-    if (!agent.exists) {
+    const approvalRequirements = parsed.data.approvalRequirements;
+    const approverIds = approvalRequirements.approverIds ?? [uid];
+    if (!approverIds.includes(uid) || approverIds.includes(parsed.data.authorizedAgentId)) {
       return apiError(
         422,
-        'INVALID_AGENT',
-        'The authorized agent must have a registered user profile.',
+        'INVALID_APPROVERS',
+        'The mandate owner must be included in the approval policy and the authorized agent cannot approve their own operations.',
+      );
+    }
+
+    const profileRefs = [
+      parsed.data.authorizedAgentId,
+      ...new Set(approverIds),
+    ].map((userId) => firestore.collection('users').doc(userId));
+    const profiles = await Promise.all(profileRefs.map((profileRef) => profileRef.get()));
+    if (profiles.some((profile) => !profile.exists)) {
+      return apiError(
+        422,
+        'INVALID_USER',
+        'The authorized agent and every approver must have a registered user profile.',
       );
     }
 
     const mandateRef = firestore.collection('mandates').doc();
+    const initialVersionRef = mandateRef.collection('versions').doc('000001');
     const now = getServerTimestamp();
     const mandate = {
       ownerId: uid,
@@ -118,13 +135,22 @@ export async function POST(request: Request) {
       spendingLimitMinor: parsed.data.spendingLimitMinor,
       spentAmountMinor: 0,
       reservedAmountMinor: 0,
+      authorizationReservedAmountMinor: 0,
+      velocityUsage: { totalTransactionCount: 0 },
       currency: parsed.data.currency,
+      durationType: parsed.data.durationType,
       startsAt: new Date(parsed.data.startsAt),
-      expiresAt: new Date(parsed.data.expiresAt),
+      expiresAt: parsed.data.expiresAt ? new Date(parsed.data.expiresAt) : null,
       allowedOperations: parsed.data.allowedOperations,
-      approvalRequirements: parsed.data.approvalRequirements,
+      approvalRequirements: {
+        ...approvalRequirements,
+        approverIds,
+      },
       executionConditions: parsed.data.executionConditions,
       status: 'draft',
+      version: 1,
+      emergencySuspension: null,
+      renewalRequest: null,
       pendingLimitRequest: null,
       createdAt: now,
       updatedAt: now,
@@ -132,6 +158,13 @@ export async function POST(request: Request) {
 
     await firestore.runTransaction(async (transaction) => {
       transaction.create(mandateRef, mandate);
+      transaction.create(initialVersionRef, {
+        version: 1,
+        createdBy: uid,
+        createdAt: now,
+        reason: 'Mandate created.',
+        snapshot: mandate,
+      });
       writeMandateAuditEvent(firestore, transaction, {
         mandateId: mandateRef.id,
         action: 'mandate.created',

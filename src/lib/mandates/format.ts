@@ -4,6 +4,12 @@ type TimestampLike = {
   toDate?: () => Date;
 };
 
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === 'object' && value !== null
+    ? value as Record<string, unknown>
+    : null;
+}
+
 export function timestampToIso(value: unknown): string | null {
   if (value instanceof Date) {
     return value.toISOString();
@@ -47,11 +53,28 @@ export function formatMandate(
   now = new Date(),
 ): Record<string, unknown> {
   const status = mandateStatusSchema.parse(data.status);
+  const renewalRequestData = asRecord(data.renewalRequest);
+  const renewalRequest = renewalRequestData
+      ? {
+        ...renewalRequestData,
+        requestedExpiresAt: timestampToIso(renewalRequestData.requestedExpiresAt),
+        requestedAt: timestampToIso(renewalRequestData.requestedAt),
+      }
+      : data.renewalRequest ?? null;
+  const emergencySuspensionData = asRecord(data.emergencySuspension);
+  const emergencySuspension = emergencySuspensionData
+      ? {
+        ...emergencySuspensionData,
+        suspendedAt: timestampToIso(emergencySuspensionData.suspendedAt),
+      }
+      : data.emergencySuspension ?? null;
   return {
     ...data,
     id,
     startsAt: timestampToIso(data.startsAt),
     expiresAt: timestampToIso(data.expiresAt),
+    renewalRequest,
+    emergencySuspension,
     createdAt: timestampToIso(data.createdAt),
     updatedAt: timestampToIso(data.updatedAt),
     status: effectiveMandateStatus(status, data.expiresAt, now),
