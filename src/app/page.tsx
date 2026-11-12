@@ -73,17 +73,17 @@ const capabilities = [
 const safeguards = [
   {
     title: 'Verified identity',
-    description: 'Firebase ID tokens are verified on the authenticated profile API.',
+    description: 'Firebase ID tokens are verified on protected API routes.',
     icon: Fingerprint,
   },
   {
     title: 'Scoped access',
-    description: 'Profile reads and updates use the UID from the verified token. Broader project permissions are not implemented yet.',
+    description: 'Server-side checks scope access to owners, authorized agents, and contract participants.',
     icon: LockKeyhole,
   },
   {
     title: 'Auditable transactions',
-    description: 'Payment traceability is part of the product design; transaction audit logging is not implemented yet.',
+    description: 'Payment status and events are recorded per transaction; a cross-workspace audit log is not available yet.',
     icon: History,
   },
 ];
@@ -102,9 +102,9 @@ export default function Home() {
               The infrastructure for agent-to-agent commerce.
             </h1>
             <p className="mt-6 max-w-xl text-lg leading-8 text-mp-app-bg">
-              AI agents can discover services, negotiate terms, and execute authorized payments.
-              MandatePay brings the agreement and payment flow together, with people in control of
-              the final approval.
+              Agents can discover services and negotiate terms, then connect approved agreements
+              to sandbox payment flows. MandatePay keeps people in control of approvals and
+              payment authorization.
             </p>
             <div className="mt-9 flex flex-col gap-3 sm:flex-row">
               <Link
@@ -252,8 +252,9 @@ export default function Home() {
               Trust should be part of the flow.
             </h2>
             <p className="mp-copy mt-4">
-              Identity checks are implemented for profile APIs. Broader project permissions and
-              transaction audit logging are not implemented yet.
+              Identity checks are implemented across protected APIs, with server-side access
+              scoped to the relevant owners, agents, and contract participants. A cross-workspace
+              audit log is not available yet.
             </p>
           </div>
           <div className="grid gap-4">
