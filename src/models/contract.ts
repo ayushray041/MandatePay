@@ -140,6 +140,8 @@ export const contractRecordSchema = z.object({
   approvals: z.array(z.string().min(1)),
   rejectionReason: z.string().nullable(),
   expiresAt: z.string(),
+  activatedAt: z.string().nullable(),
+  eventCount: z.number().int().nonnegative(),
   createdAt: z.string().nullable(),
   updatedAt: z.string().nullable(),
 }).strict();

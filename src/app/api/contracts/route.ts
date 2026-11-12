@@ -240,6 +240,7 @@ export async function POST(request: Request) {
         approvals: [],
         rejectionReason: null,
         expiresAt: new Date(expiresAt),
+        activatedAt: null,
         eventCount: 1,
         createdAt: timestamp,
         updatedAt: timestamp,
@@ -265,6 +266,7 @@ export async function POST(request: Request) {
         approvals: [],
         rejectionReason: null,
         expiresAt: new Date(expiresAt),
+        activatedAt: null,
         createdAt: now,
         updatedAt: now,
       };

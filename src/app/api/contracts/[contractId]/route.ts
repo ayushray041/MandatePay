@@ -1,0 +1,59 @@
+import { adminFirestore } from '@/lib/firebase/admin';
+import { authenticateRequest } from '@/lib/api/auth';
+import { apiError, apiSuccess } from '@/lib/api/responses';
+import { ContractError, contractErrorResponse } from '@/lib/contracts/errors';
+import {
+  formatContract,
+  formatContractAmendment,
+  formatContractEvent,
+  formatContractVersion,
+} from '@/lib/contracts/format';
+import { assertContractParty } from '@/lib/contracts/policy';
+import { contractRecordSchema } from '@/models/contract';
+
+type RouteContext = { params: Promise<{ contractId: string }> };
+
+export async function GET(request: Request, context: RouteContext) {
+  const authentication = await authenticateRequest(request);
+  if (!authentication.authenticated) {
+    return authentication.response;
+  }
+  if (!adminFirestore) {
+    return apiError(503, 'SERVICE_UNAVAILABLE', 'Contract storage is unavailable.');
+  }
+
+  const { contractId } = await context.params;
+  const contractRef = adminFirestore.collection('contracts').doc(contractId);
+  try {
+    const snapshot = await contractRef.get();
+    if (!snapshot.exists) {
+      return apiError(404, 'CONTRACT_NOT_FOUND', 'Contract was not found.');
+    }
+    const data = snapshot.data();
+    if (!data) {
+      throw new Error('Contract document has no data.');
+    }
+    assertContractParty(data, authentication.user.uid);
+    const contract = contractRecordSchema.parse(formatContract(snapshot.id, data));
+    const [versions, amendments, events] = await Promise.all([
+      contractRef.collection('versions').orderBy('version', 'asc').get(),
+      contractRef.collection('amendments').orderBy('createdAt', 'asc').get(),
+      contractRef.collection('events').orderBy('sequence', 'asc').get(),
+    ]);
+
+    return apiSuccess({
+      contract,
+      versions: versions.docs.map((version) => formatContractVersion(version.id, version.data())),
+      amendments: amendments.docs.map((amendment) => (
+        formatContractAmendment(amendment.id, amendment.data())
+      )),
+      events: events.docs.map((event) => formatContractEvent(event.id, event.data())),
+    });
+  } catch (error: unknown) {
+    if (error instanceof ContractError) {
+      return contractErrorResponse(error);
+    }
+    console.error('Failed to load contract details.', error);
+    return apiError(500, 'INTERNAL_ERROR', 'Contract details could not be loaded.');
+  }
+}

@@ -11,6 +11,7 @@ const terms = {
     {
       userId: 'owner-a',
       displayName: 'Owner A',
+      role: 'client',
       agentId: 'agent-a',
       agentDisplayName: 'Agent A',
       mandateId: 'mandate-a',
@@ -19,6 +20,7 @@ const terms = {
     {
       userId: 'owner-b',
       displayName: 'Owner B',
+      role: 'freelancer',
       agentId: 'agent-b',
       agentDisplayName: 'Agent B',
       mandateId: 'mandate-b',

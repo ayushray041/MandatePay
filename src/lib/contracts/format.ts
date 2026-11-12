@@ -7,6 +7,7 @@ export function formatContract(id: string, data: Record<string, unknown>) {
     id,
     status: contractExpiryStatus(data.status, data.expiresAt),
     expiresAt: timestampToIso(data.expiresAt),
+    activatedAt: timestampToIso(data.activatedAt),
     createdAt: timestampToIso(data.createdAt),
     updatedAt: timestampToIso(data.updatedAt),
   };
