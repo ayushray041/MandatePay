@@ -94,6 +94,24 @@ export async function POST(request: Request, context: RouteContext) {
         );
       }
 
+      if (parsed.data.action === 'revoke') {
+        const reservedAmountMinor = mandate.reservedAmountMinor ?? 0;
+        if (
+          typeof reservedAmountMinor !== 'number'
+          || !Number.isSafeInteger(reservedAmountMinor)
+          || reservedAmountMinor < 0
+        ) {
+          throw new MandateError(500, 'INVALID_MANDATE', 'Mandate reservation data is invalid.');
+        }
+        if (reservedAmountMinor > 0) {
+          throw new MandateError(
+            409,
+            'MANDATE_HAS_RESERVATIONS',
+            'Mandate cannot be revoked while accepted budget reservations remain.',
+          );
+        }
+      }
+
       if (parsed.data.action === 'activate' || parsed.data.action === 'resume') {
         if (!startsAt || Date.parse(startsAt) > now.getTime()) {
           throw new MandateError(

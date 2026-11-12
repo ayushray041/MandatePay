@@ -24,6 +24,7 @@ type TestMandateData = {
     ownerApprovalAboveMinor?: number;
   };
   pendingLimitRequest?: Record<string, unknown> | null;
+  reservedAmountMinor?: number;
   executionConditions: {
     maximumOperationAmountMinor: number;
     requiredDescriptionTerms: string[];
@@ -80,6 +81,7 @@ import { PATCH as decideAuthorization } from '@/app/api/mandates/[mandateId]/aut
 import { POST as requestLimitIncrease } from '@/app/api/mandates/[mandateId]/limit-requests/route';
 import { POST as decideLimitIncrease } from '@/app/api/mandates/[mandateId]/limit-requests/decision/route';
 import { PATCH as updateMandate } from '@/app/api/mandates/[mandateId]/route';
+import { POST as updateMandateLifecycle } from '@/app/api/mandates/[mandateId]/lifecycle/route';
 
 const context = { params: Promise.resolve({ mandateId: 'mandate-1' }) };
 
@@ -176,6 +178,50 @@ describe('mandate APIs', () => {
 
     expect(response.status).toBe(403);
     expect(mocks.transaction.update).not.toHaveBeenCalled();
+  });
+
+  it('prevents irreversible revocation while accepted budget remains reserved', async () => {
+    mocks.mandateData.reservedAmountMinor = 1_000;
+    mocks.authenticateRequest.mockResolvedValue({
+      authenticated: true,
+      user: { uid: 'owner-1' },
+    });
+
+    const response = await updateMandateLifecycle(
+      request({ action: 'revoke' }),
+      context,
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: { code: 'MANDATE_HAS_RESERVATIONS' },
+    });
+    expect(mocks.transaction.update).not.toHaveBeenCalled();
+    expect(mocks.writeMandateAuditEvent).not.toHaveBeenCalled();
+  });
+
+  it('allows mandate revocation after reservations are resolved', async () => {
+    mocks.mandateData.reservedAmountMinor = 0;
+    mocks.authenticateRequest.mockResolvedValue({
+      authenticated: true,
+      user: { uid: 'owner-1' },
+    });
+
+    const response = await updateMandateLifecycle(
+      request({ action: 'revoke' }),
+      context,
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.transaction.update).toHaveBeenCalledWith(
+      expect.objectContaining({ collection: 'mandates', id: 'mandate-1' }),
+      expect.objectContaining({ status: 'revoked' }),
+    );
+    expect(mocks.writeMandateAuditEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ action: 'mandate.revoked' }),
+    );
   });
 
   it('prevents an owner from escalating a limit through ordinary mandate edits', async () => {
