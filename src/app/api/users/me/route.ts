@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { adminFirestore } from '@/lib/firebase/admin';
 import { verifyIdToken } from '@/lib/firebase/verify-token';
-import { FieldValue } from 'firebase-admin/firestore';
+import { getDocumentReference, getServerTimestamp } from '@/lib/firebase/firestore';
 import { profileCreateSchema, profileUpdateSchema } from '@/models/user';
 
 export async function GET(request: Request) {
@@ -21,8 +21,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Firebase Admin SDK is not configured' }, { status: 500 });
   }
 
-  const db = adminFirestore;
-  const userRef = db.collection('users').doc(uid);
+  const userRef = getDocumentReference('users', uid);
   const snapshot = await userRef.get();
 
   if (!snapshot.exists) {
@@ -65,8 +64,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Firebase Admin SDK is not configured' }, { status: 500 });
   }
 
-  const db = adminFirestore;
-  const userRef = db.collection('users').doc(uid);
+  const userRef = getDocumentReference('users', uid);
   const snapshot = await userRef.get();
 
   if (snapshot.exists) {
@@ -78,8 +76,8 @@ export async function POST(request: Request) {
     email,
     displayName: parsed.data.displayName,
     role: parsed.data.role,
-    createdAt: FieldValue.serverTimestamp(),
-    updatedAt: FieldValue.serverTimestamp(),
+    createdAt: getServerTimestamp(),
+    updatedAt: getServerTimestamp(),
   };
 
   try {
@@ -134,8 +132,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: 'Firebase Admin SDK is not configured' }, { status: 500 });
   }
 
-  const db = adminFirestore;
-  const userRef = db.collection('users').doc(uid);
+  const userRef = getDocumentReference('users', uid);
   const snapshot = await userRef.get();
 
   if (!snapshot.exists) {
@@ -144,7 +141,7 @@ export async function PATCH(request: Request) {
 
   const updateData = {
     ...parsed.data,
-    updatedAt: FieldValue.serverTimestamp(),
+    updatedAt: getServerTimestamp(),
   };
 
   await userRef.update(updateData);
