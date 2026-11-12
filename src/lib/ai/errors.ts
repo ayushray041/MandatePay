@@ -34,5 +34,5 @@ export function aiErrorResponse(error: unknown): Response {
       ? { validationPaths: error.issues.map((issue) => issue.path.join('.')) }
       : {}),
   }));
-  return apiError(500, 'AI_INTERNAL_ERROR', 'Negotiation intelligence could not be completed.');
+  return apiError(500, 'AI_INTERNAL_ERROR', 'AI intelligence could not be completed.');
 }

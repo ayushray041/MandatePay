@@ -134,22 +134,27 @@
 ## Phase 6: AI-powered negotiation intelligence
 
 ### Completed
-- Added a server-only Gemini provider abstraction with bounded JSON generation, a 12-second timeout, explicit configuration/provider/output errors, and structured logs that omit prompts, outputs, identities, and commercial content.
+- Added a provider-independent structured `AiProvider` interface and server-side factory. Gemini is currently the only bundled adapter; provider selection/model version are configurable. Calls are bounded, timed out, schema-validated, and never expose provider keys.
 - Added authenticated, participant-only negotiation recommendations, deterministic mandate-violation explanations, and offer comparisons. Suggested counteroffers are validated against the requesting agent's mandate; acceptance advice is withheld when terms violate the mandate or require owner approval. Suggestions are never submitted automatically.
 - Added model-assisted negotiation summaries with explicit offer/event coverage counts. The request includes at most the latest 30 offers and 50 events; the response reports included and total counts so partial history is not presented as complete.
-- Added participant-only current-version contract-clause analysis. Returned excerpts must exactly occur in the analyzed clause, and the server supplies a fixed non-legal-advice disclaimer.
-- Added negotiation and contract UI panels for recommendations, deterministic comparisons, history summaries, mandate checks, and clause analysis, including provider/error states.
-- AI output is not written to Firestore. No provider tools, payment execution, mandate mutation, contract approval, or automatic state changes are exposed to the model.
+- Added participant-only current-version contract-clause analysis with exact-excerpt validation and a fixed non-legal-advice disclaimer. Provider outages return an explicit empty fallback instead of invented clause findings.
+- Added explainable deterministic payment anomaly/duplicate signals, simple historical spending forecasts, user-specific vendor outcomes/price estimates, and registered-agent activity burst monitoring. Insufficient evidence is labeled; risk results do not authorize or block financial actions.
+- Added private caller-scoped recommendation/risk history with evidence references and provider/model/prompt versions, server-only Firestore rules, and a transactional per-user daily LLM request quota.
+- Added provider latency/token telemetry and optional operator-rate-based cost estimates. Prompts/content and credentials are excluded from logs. Model confidence remains uncalibrated and is reported as unavailable; human review is required for model suggestions.
+- Added regression/evaluation fixtures for risk signals, API isolation, provider errors, fallback behavior, request quotas, and history access. Fixtures are synthetic tests, not training data; no MandatePay ML model has been trained.
+- Added negotiation and contract UI notices for human review and uncalibrated confidence. No provider tools, payment execution, mandate mutation, contract approval, or automatic state changes are exposed to the model.
 
 ### Verification
-- `npm test`: passed — 26 test files passed, 1 skipped; 110 tests passed, 3 skipped.
+- `npm test`: passed — 39 test files passed, 1 skipped; 184 tests passed, 4 skipped.
 - `npx tsc --noEmit`: passed.
 - `npm run lint`: passed.
-- `npm run build`: passed; generated the negotiation-intelligence and contract-analysis API routes. Next.js emitted a non-blocking warning that a parent-directory `package-lock.json` is outside the repository.
+- `npm run build`: passed; generated the negotiation-intelligence, contract-analysis, AI history, and risk API routes.
 - `git diff --check`: passed.
-- Gemini was not called with live credentials; no AI result is represented as live. The skipped emulator-backed rules tests require `FIRESTORE_EMULATOR_HOST` and JDK 21 or newer.
+- `npm run test:rules`: could not start because Java is unavailable; the test file was skipped by `npm test` without `FIRESTORE_EMULATOR_HOST`.
+- Gemini was not called with live credentials; no AI result is represented as live.
 
 ### Scope and remaining work
-- Configure `GEMINI_API_KEY` as a server-only environment variable and perform an authorized provider integration check before rollout. The optional `GEMINI_MODEL` defaults to `gemini-2.5-flash`.
-- Negotiation summaries send only the latest 30 offers and 50 events; coverage is included in the response. No prompt or model output is persisted.
+- Configure server-only `AI_PROVIDER`, `GEMINI_API_KEY`, and optional token price rates; perform an authorized provider integration check before rollout. The optional `GEMINI_MODEL` defaults to `gemini-2.5-flash`.
+- Validated structured results and evidence references are persisted to private `aiDecisionHistory`; prompts/raw documents are not. No automatic history retention/TTL cleanup or provider account-level global spend cap is configured.
+- The risk forecast is a 30-day daily-average projection and vendor estimates use only caller-visible history. Neither establishes future spend or market price; production-quality evaluation remains outstanding.
 - The Gemini adapter is not a legal review or source of authority. Contract analysis is an advisory review aid and does not determine legal enforceability.

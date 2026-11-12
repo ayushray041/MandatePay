@@ -42,6 +42,8 @@ authenticated agent owner.
 | `payments` | Contract ID | `contractId`, negotiation and participant IDs, payer/payee and mandate IDs, server-derived amount/currency, provider order/authorization/capture/refund IDs, idempotency hash, status, pending operation, attempt counters, mandate approval, timestamps | One payment record per contract, with a new idempotent cycle allowed after cancellation. Secret credentials and raw webhook payloads are not stored. |
 | `payments/{contractId}/events` | Auto ID | sequence, lifecycle event, source, actor, optional provider event ID and details, `createdAt` | Append-only payment and provider activity history. |
 | `paypalWebhookEvents` | SHA-256 of provider event ID | original provider event ID, event type, processing outcome, payment ID, receive timestamp | Durable webhook idempotency receipts; does not store raw event bodies or signature headers. |
+| `aiDecisionHistory` | Auto ID | `actorUserId`, action, resource type/ID, source, provider/model/prompt version, confidence basis, human-review flag, bounded evidence references, structured result, `createdAt` | Private caller-scoped recommendation and risk history. Prompt context and raw source documents are not stored. |
+| `aiUsage` | SHA-256 of Firebase UID | `userHash`, UTC day, daily request count, `updatedAt` | Atomic per-user LLM request quota; contains no raw UID and keeps one rolling daily record per user. |
 
 Negotiation lifecycle states are `initiated`, `offer_submitted`, `counter_offered`,
 `pending_owner_approval`, `accepted`, `rejected`, `expired`, and `cancelled`. Every state change
@@ -52,9 +54,14 @@ amount against both. Reserved amounts reduce available mandate capacity and are 
 payment record. Optional quantity/SLA/contract/conditional terms are strictly validated and copied
 into immutable contract versions without being interpreted as payment authorization.
 
-Negotiation intelligence and contract analysis are stateless: requests use existing participant and
-contract-version records plus caller-owned strategy profiles, and prompts/model responses are not
-persisted in Firestore. Price references use only observed offers and are labeled as non-market data.
+Negotiation intelligence and contract analysis use existing participant and immutable contract
+version records plus caller-owned strategy profiles. Prompts and source text are not persisted.
+Validated structured results and references to their evidence are persisted in
+`aiDecisionHistory` for the verified caller; entries currently have no automatic retention/TTL
+cleanup. Risk analysis is deterministic and reads only caller-visible payment history or the
+caller's registered-agent activity. Its price references are based only on observed completed
+payments/offers and are labeled as non-market data. `aiUsage` stores a hashed user key and one daily
+counter, not prompt or model content.
 
 Negotiations expire on access and through `POST /api/negotiations/expire`. The worker transactionally
 marks at most 100 due records per call and appends the corresponding event/version. Production must
@@ -90,6 +97,7 @@ accepting client-provided identity or location.
 - Negotiation batch lookup by `batchId` and scheduled expiry by `status`/`expiresAt`.
 - Contract participant listing by `participantIds` and `updatedAt`.
 - Payment history listing by `participantIds` and `updatedAt`.
+- AI recommendation history listing by `actorUserId` and `createdAt`.
 - Amendment reviewer listing by `requiredApproverIds` and `updatedAt`.
 
 ### Security rules
@@ -101,8 +109,9 @@ Rules in `firestore.rules`:
   sessions, usage counters, activity, webhook registrations, mandates, authorizations, negotiations,
   negotiation offers/events/versions/disputes, strategy profiles, contracts, contract versions, amendments, contract events, payments,
   payment events, marketplace profiles/listings/organizations/members/preferences/reviews/metrics,
-  payment outcome receipts, and webhook idempotency receipts. APIs perform identity, participant,
-  visibility, and ownership checks because Firebase Admin SDK access bypasses rules.
+  payment outcome receipts, AI recommendation history, AI usage counters, and webhook idempotency
+  receipts. APIs perform identity, participant, visibility, and ownership checks because Firebase
+  Admin SDK access bypasses rules.
 - Deny all other direct client access by default.
 
 The rules are configured by `firebase.json`. Emulator-backed rules tests require

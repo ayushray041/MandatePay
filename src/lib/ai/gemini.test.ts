@@ -12,17 +12,24 @@ vi.mock('@google/genai', () => ({
   }),
 }));
 
-import { createAiProvider } from '@/lib/ai/gemini';
+import { createAiProvider } from '@/lib/ai/factory';
 
 describe('Gemini provider boundary', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.stubEnv('GEMINI_API_KEY', 'provider-test-secret');
     vi.stubEnv('GEMINI_MODEL', '');
-    mocks.generateContent.mockResolvedValue({ text: '{"ok":true}' });
+    vi.stubEnv('AI_PROVIDER', 'gemini');
+    vi.stubEnv('GEMINI_INPUT_USD_PER_MILLION_TOKENS', '10');
+    vi.stubEnv('GEMINI_OUTPUT_USD_PER_MILLION_TOKENS', '20');
+    mocks.generateContent.mockResolvedValue({
+      text: '{"ok":true}',
+      usageMetadata: { promptTokenCount: 2, candidatesTokenCount: 3 },
+    });
   });
 
   it('keeps the key server-side and requests bounded structured output without tools', async () => {
+    const info = vi.spyOn(console, 'info').mockImplementation(() => undefined);
     const provider = createAiProvider();
     const context = { offer: { description: 'untrusted message' } };
 
@@ -47,6 +54,8 @@ describe('Gemini provider boundary', () => {
       }),
     }));
     expect(mocks.generateContent.mock.calls[0][0]).not.toHaveProperty('tools');
+    expect(info).toHaveBeenCalledWith(expect.stringContaining('"estimatedCostUsd":0.00008'));
+    info.mockRestore();
   });
 
   it('fails explicitly when credentials are absent or structured output is malformed', async () => {
@@ -77,5 +86,12 @@ describe('Gemini provider boundary', () => {
       systemInstruction: 'Return JSON.',
       untrustedContext: {},
     })).rejects.toMatchObject({ code: 'AI_PROVIDER_TIMEOUT' });
+  });
+
+  it('rejects a provider name without a registered adapter', () => {
+    vi.stubEnv('AI_PROVIDER', 'unregistered-provider');
+    expect(() => createAiProvider()).toThrow(
+      expect.objectContaining({ code: 'AI_NOT_CONFIGURED' }),
+    );
   });
 });

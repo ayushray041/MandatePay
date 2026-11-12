@@ -38,12 +38,12 @@ The current dependency flow is:
 | Negotiations | `src/lib/negotiations`, `/api/negotiations` | Participant-only state machine; CAS against current offer, versioned snapshots, independent comparison batches, owner approval gates atomic dual-mandate reservation, bounded expiry and dispute handling. |
 | Contracts and amendments | `src/lib/contracts`, `/api/contracts`, `/api/amendments` | Contract ID is the accepted negotiation ID; immutable version snapshots; required party approvals; transactional reservation deltas. |
 | Payments | `src/lib/payments`, `/api/payments` | One payment record per contract and cycle; amount from the approved version; PayPal sandbox operations; webhook receipts and ledger transitions are transactional. |
-| Advisory AI | `src/lib/ai`, intelligence and analysis routes | Stateless, participant-authorized advisory calls; output does not approve or mutate financial workflows. |
+| AI decision and risk intelligence | `src/lib/ai`, `/api/ai`, negotiation intelligence and contract analysis routes | Provider interface/factory, strict schemas, rule-based risk signals, atomic request quotas, private caller-scoped recommendation history, and no authority over financial workflows. |
 
 ## Firestore layout and access model
 
 The primary collections are `users`, `agents`, `agentIdentities`, `agentApiKeys`, `agentSessions`,
-`agentUsage`, `agentActivity`, `agentWebhooks`, `mandates`, `mandateAuthorizations`,
+`agentUsage`, `agentActivity`, `agentWebhooks`, `aiDecisionHistory`, `aiUsage`, `mandates`, `mandateAuthorizations`,
 `auditLogs`, `negotiations`, `negotiationStrategyProfiles`, `contracts`, `payments`, and
 `paypalWebhookEvents`. Offers, negotiation events/versions/disputes, contract versions, amendments,
 contract events, and payment events are subcollections.
@@ -94,6 +94,34 @@ defense.
   unbounded attacker-triggered log writes.
 - Webhook endpoint registration is currently metadata-only; no sender, payload signature, or retry
   worker exists.
+
+## AI decision and risk intelligence
+
+- Business logic consumes `AiProvider`; the server-side provider factory selects an adapter using
+  `AI_PROVIDER`. Gemini is the only bundled adapter. A new provider requires an adapter implementing
+  the same interface; no route or policy code should depend on its SDK.
+- Structured LLM outputs are parsed by strict Zod schemas. External negotiation terms and contract
+  clauses are bounded and serialized into untrusted data separately from system instructions. No
+  model tools are enabled. Output is advice only; deterministic mandate checks and human owner
+  approvals remain the sole financial authorization boundary.
+- Provider outages use clearly labeled deterministic fallbacks where available. Contract-clause
+  fallback reports no analysis rather than fabricating findings. The provider does not approve
+  owner requests, alter mandates, sign contracts, or invoke payment operations.
+- Rules compute payment anomalies, possible duplicate signals, user-specific vendor signals, and a
+  30-day daily-average spending projection. These are thresholds over the caller's own validated
+  history, not trained models or market estimates. Insufficient samples are labeled, and the risk
+  confidence score is a sample-size heuristic, not a calibrated probability.
+- Private history stores validated structured results, reference IDs, evidence sample counts,
+  provider/model/prompt versions, and an explicit confidence basis. It omits prompts, raw source
+  documents, and provider credentials. History currently has no automatic TTL/retention cleanup;
+  define one before production retention requirements apply.
+- Provider telemetry excludes prompts and content. It records action, provider/model, latency,
+  token usage when available, and estimated USD cost only when operator-supplied token rates are
+  configured. `AI_DAILY_REQUEST_LIMIT` is enforced transactionally per hashed user/day (default
+  100). Rule-only risk analysis does not spend LLM quota.
+- Synthetic evaluation fixtures live in tests only. They are regression cases, not training data;
+  no MandatePay model has been trained. No live provider, cost, latency, or predictive-quality
+  evaluation has been performed.
 
 ## Assessment changes
 

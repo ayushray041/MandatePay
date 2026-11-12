@@ -635,6 +635,13 @@ export function NegotiationDetail({ negotiationId }: Props) {
         {intelligenceError && <p className="text-sm text-red-800" role="alert">{intelligenceError}</p>}
         {intelligence && (
           <div className="space-y-3 border-t border-mp-warm-grey pt-4" aria-live="polite">
+            {intelligence.requiresHumanReview && (
+              <p className="text-xs text-mp-medium-grey">
+                Human review required. {intelligence.confidenceMethod === 'deterministic_rule'
+                  ? 'Rule result is not a probability.'
+                  : 'Model confidence is not calibrated.'}
+              </p>
+            )}
             {intelligence.action === 'recommend' && (
               <>
                 <p className="mp-kicker">{intelligence.source === 'gemini' ? 'Model-assisted suggestion' : 'Deterministic status'}</p>

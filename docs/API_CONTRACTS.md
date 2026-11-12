@@ -215,13 +215,49 @@ budget only; it does not execute a service, contract, payment, or operation auth
 Recommendations and outcome predictions are not decisions: a counteroffer is returned only after
 deterministic mandate validation and is never submitted automatically. Every eventual acceptance
 still passes server-side mandate checks and required owner approval. Model responses are strict-Zod
-validated and cannot mutate negotiation, approval, contract, or payment state. If Gemini is
-unavailable, deterministic offer metrics remain available with an explicit notice; model analysis
-and summary output is null rather than fabricated. The observed price reference is not represented
-as market pricing. Set server-only `GEMINI_API_KEY`; optional
-`GEMINI_MODEL` defaults to `gemini-2.5-flash`. Provider keys and AI output are not stored in Firestore.
-Contract analysis returns an explicit provider error when unavailable; it does not return a fabricated
-analysis.
+validated and cannot mutate negotiation, approval, contract, or payment state. All model-produced
+recommendations require human review. Model confidence is uncalibrated and is reported as unavailable;
+the application does not turn model self-assessments into probabilities. If a provider is unavailable,
+deterministic offer metrics remain available with an explicit notice; model analysis, summaries, and
+contract analysis are omitted rather than fabricated. The observed price reference is not represented
+as market pricing.
+
+#### Decision and risk intelligence
+
+| Method | Path | Request | Response / notes |
+|--------|------|---------|------------------|
+| POST | `/api/ai/risk` | `{ action: "payment_anomaly", paymentId }` | Caller must be a participant. Detects observed same-vendor/service price outliers and possible duplicates from up to 100 caller-visible payment records. Signals do not block or authorize payments. |
+| POST | `/api/ai/risk` | `{ action: "spending_forecast", currency }` | Projects the next 30 days from the caller's completed payments in the prior 30 days, using a simple daily average. |
+| POST | `/api/ai/risk` | `{ action: "vendor_risk", vendorId, currency }` | Uses only this caller's observed completed/failed/refunded history for the vendor and currency; price estimates require at least three comparable completed payments. |
+| POST | `/api/ai/risk` | `{ action: "agent_behavior" }` | Monitors the current account's registered agent activity only; reports a burst signal at 30 recorded events per hour. |
+| GET | `/api/ai/history` | – | Returns at most 50 private recommendation/risk records for the verified caller. Stored records include structured result, evidence references, provider/model/prompt version, confidence basis, and human-review flag; prompts and raw source documents are not stored. No automatic history retention/TTL cleanup is configured. |
+
+Risk results are deterministic rules, not trained ML outputs. Confidence is a sample-size heuristic,
+not a calibrated probability. Insufficient evidence is explicitly labeled; vendor price estimates
+use only observed same-currency completed payments and are not market-price claims. A risk signal
+never approves, blocks, reserves, or executes a transaction.
+Model-generated responses include `confidenceScore: null`,
+`confidenceMethod: "not_calibrated"`, and `requiresHumanReview: true`; null is intentional because
+the connected LLM does not provide calibrated confidence. Rule explanations are labeled
+`deterministic_rule` instead of presenting a probability.
+
+AI services depend on the provider-independent `AiProvider` interface and a server-side provider
+factory. `AI_PROVIDER` selects the configured adapter; `gemini` is the only bundled provider today.
+Set server-only `GEMINI_API_KEY`; `GEMINI_MODEL` defaults to `gemini-2.5-flash`. There is no trained
+MandatePay model. Untrusted offers, events, and clauses are bounded and serialized as data separately
+from system instructions. No model tools are enabled; output is validated before use and cannot call
+authorization, owner-approval, contract-signing, mandate mutation, or payment APIs.
+When Gemini is enabled, bounded offer/contract text is sent to Google's Gemini API for the requested
+analysis. Structured output history is private to the caller but may include generated text and
+short clause excerpts. Do not enable this provider for data that policy prohibits sending to that
+external service.
+
+Provider logs contain action, provider/model version, latency, success/failure, token counts where
+reported, and estimated USD cost when `GEMINI_INPUT_USD_PER_MILLION_TOKENS` and
+`GEMINI_OUTPUT_USD_PER_MILLION_TOKENS` are configured. Cost is an estimate based on operator-supplied
+rates, not a provider invoice. `AI_DAILY_REQUEST_LIMIT` sets the atomic per-user daily LLM request
+limit (default 100). Rule-only risk analysis does not consume LLM quota. No prompts, provider
+credentials, agent text, or contract text are written to operational logs.
 
 ### Contracts and amendments
 

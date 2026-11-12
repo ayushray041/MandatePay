@@ -1,7 +1,10 @@
 import { adminFirestore } from '@/lib/firebase/admin';
 import { authenticateRequest } from '@/lib/api/auth';
 import { apiError, apiSuccess } from '@/lib/api/responses';
-import { createAiProvider } from '@/lib/ai/gemini';
+import { createAiProvider } from '@/lib/ai/factory';
+import { recordAiDecision } from '@/lib/ai/history';
+import { attachHumanReviewMetadata } from '@/lib/ai/review';
+import { consumeAiRequestQuota } from '@/lib/ai/usage';
 import { aiErrorResponse, AiRequestError } from '@/lib/ai/errors';
 import { recommendNegotiation, assessOffer } from '@/lib/ai/negotiation-recommendation';
 import { compareNegotiationOffers } from '@/lib/ai/offer-comparison';
@@ -35,6 +38,7 @@ export async function POST(request: Request, context: RouteContext) {
 
   const { negotiationId } = await context.params;
   try {
+    const userId = authentication.user.uid;
     const firestore = adminFirestore;
     const negotiationRef = firestore.collection('negotiations').doc(negotiationId);
     const negotiationSnapshot = await negotiationRef.get();
@@ -49,6 +53,9 @@ export async function POST(request: Request, context: RouteContext) {
       && (isNegotiationTerminal(negotiation.status) || isNegotiationExpired(negotiation, new Date()))
     ) {
       throw new AiRequestError(409, 'NEGOTIATION_CLOSED', 'Intelligence is unavailable for a closed or expired negotiation.');
+    }
+    if (parsed.data.action !== 'explain_violation') {
+      await consumeAiRequestQuota(userId);
     }
 
     if (parsed.data.action === 'summarize') {
@@ -100,14 +107,36 @@ export async function POST(request: Request, context: RouteContext) {
         || !Number.isSafeInteger(totalEvents) || totalEvents < events.length) {
         throw new AiRequestError(500, 'INVALID_NEGOTIATION_HISTORY', 'Negotiation history counts are inconsistent.');
       }
-      return apiSuccess(await summarizeNegotiationHistory(createAiProvider(), {
+      const provider = createAiProvider();
+      const result = attachHumanReviewMetadata(await summarizeNegotiationHistory(provider, {
         offers,
         events,
-        agentId: authentication.user.uid,
+        agentId: userId,
         status: String(negotiation.status),
         totalOffers,
         totalEvents,
       }));
+      await recordAiDecision({
+        userId,
+        action: 'negotiation_summary',
+        resourceType: 'negotiation',
+        resourceId: negotiationId,
+        source: result.source,
+        providerId: provider.metadata?.providerId ?? 'gemini',
+        modelVersion: provider.metadata?.modelVersion ?? (process.env.GEMINI_MODEL?.trim() || 'unreported'),
+        promptVersion: 'negotiation-summary-v1',
+        confidenceScore: null,
+        confidenceMethod: 'not_calibrated',
+        requiresHumanReview: true,
+        evidence: [{
+          type: 'negotiation_history',
+          reference: negotiationId,
+          sampleSize: offers.length + events.length,
+        }],
+        result,
+        provider,
+      });
+      return apiSuccess(result);
     }
 
     if (parsed.data.action === 'analyze') {
@@ -140,12 +169,34 @@ export async function POST(request: Request, context: RouteContext) {
             priorities: ['price', 'delivery', 'certainty'],
             concessionStepBasisPoints: 500,
           });
-      return apiSuccess(await analyzeNegotiation(createAiProvider(), {
+      const provider = createAiProvider();
+      const result = attachHumanReviewMetadata(await analyzeNegotiation(provider, {
         offers,
-        agentId: authentication.user.uid,
+        agentId: userId,
         strategy,
         totalOffers: Number(negotiation.offerCount),
       }));
+      await recordAiDecision({
+        userId,
+        action: 'negotiation_analysis',
+        resourceType: 'negotiation',
+        resourceId: negotiationId,
+        source: result.source,
+        providerId: provider.metadata?.providerId ?? 'gemini',
+        modelVersion: provider.metadata?.modelVersion ?? (process.env.GEMINI_MODEL?.trim() || 'unreported'),
+        promptVersion: 'negotiation-analysis-v1',
+        confidenceScore: null,
+        confidenceMethod: 'not_calibrated',
+        requiresHumanReview: true,
+        evidence: [{
+          type: 'negotiation_offers',
+          reference: negotiationId,
+          sampleSize: offers.length,
+        }],
+        result,
+        provider,
+      });
+      return apiSuccess(result);
     }
 
     const ownMandateId = perspective === 'initiator'
@@ -173,15 +224,35 @@ export async function POST(request: Request, context: RouteContext) {
       const assessment = assessOffer(
         mandate,
         agent,
-        authentication.user.uid,
+        userId,
         parsed.data.terms,
         new Date(),
       );
-      return apiSuccess(mandateExplanationResponseSchema.parse({
+      const result = attachHumanReviewMetadata(mandateExplanationResponseSchema.parse({
         action: 'explain_violation',
         source: 'deterministic',
         mandateAssessment: assessment,
-      }));
+      }), 'deterministic_rule');
+      await recordAiDecision({
+        userId,
+        action: 'mandate_explanation',
+        resourceType: 'negotiation',
+        resourceId: negotiationId,
+        source: 'deterministic',
+        providerId: null,
+        modelVersion: 'rules-v1',
+        promptVersion: 'mandate-assessment-v1',
+        confidenceScore: null,
+        confidenceMethod: 'deterministic_rule',
+        requiresHumanReview: assessment.requiresApproval,
+        evidence: [{
+          type: 'mandate_assessment',
+          reference: String(ownMandateId),
+          sampleSize: 1,
+        }],
+        result,
+      });
+      return apiSuccess(result);
     }
 
     const offers = offersSnapshot.docs.map((offerSnapshot) => {
@@ -212,15 +283,37 @@ export async function POST(request: Request, context: RouteContext) {
       ]);
       const agentById = new Map(agents);
       const mandateById = new Map(mandates);
-      return apiSuccess(await compareNegotiationOffers(createAiProvider(), {
+      const provider = createAiProvider();
+      const result = attachHumanReviewMetadata(await compareNegotiationOffers(provider, {
         offers: validOffers.map((offer) => ({
           ...offer,
           mandate: mandateById.get(offer.mandateId) ?? null,
           agent: agentById.get(offer.submittedByAgentId) ?? null,
         })),
-        agentId: authentication.user.uid,
+        agentId: userId,
         now: new Date(),
       }));
+      await recordAiDecision({
+        userId,
+        action: 'offer_comparison',
+        resourceType: 'negotiation',
+        resourceId: negotiationId,
+        source: result.source,
+        providerId: provider.metadata?.providerId ?? 'gemini',
+        modelVersion: provider.metadata?.modelVersion ?? (process.env.GEMINI_MODEL?.trim() || 'unreported'),
+        promptVersion: 'offer-comparison-v1',
+        confidenceScore: null,
+        confidenceMethod: 'not_calibrated',
+        requiresHumanReview: true,
+        evidence: [{
+          type: 'negotiation_offers',
+          reference: negotiationId,
+          sampleSize: validOffers.length,
+        }],
+        result,
+        provider,
+      });
+      return apiSuccess(result);
     }
 
     const currentOffer = negotiation.currentOffer
@@ -238,16 +331,38 @@ export async function POST(request: Request, context: RouteContext) {
           priorities: ['price', 'delivery', 'certainty'],
           concessionStepBasisPoints: 500,
         });
-    return apiSuccess(await recommendNegotiation(createAiProvider(), {
+    const provider = createAiProvider();
+    const result = attachHumanReviewMetadata(await recommendNegotiation(provider, {
       mandate,
       agent,
-      agentId: authentication.user.uid,
+      agentId: userId,
       currentTerms: currentOffer,
       offers,
       ownMandatePerspective: perspective,
       strategy,
       now: new Date(),
     }));
+    await recordAiDecision({
+      userId,
+      action: 'negotiation_recommendation',
+      resourceType: 'negotiation',
+      resourceId: negotiationId,
+      source: result.source,
+      providerId: provider.metadata?.providerId ?? 'gemini',
+      modelVersion: provider.metadata?.modelVersion ?? (process.env.GEMINI_MODEL?.trim() || 'unreported'),
+      promptVersion: 'negotiation-recommendation-v1',
+      confidenceScore: null,
+      confidenceMethod: 'not_calibrated',
+      requiresHumanReview: true,
+      evidence: [{
+        type: 'mandate_and_offer_history',
+        reference: negotiationId,
+        sampleSize: offers.length,
+      }],
+      result,
+      provider,
+    });
+    return apiSuccess(result);
   } catch (error: unknown) {
     if (error instanceof NegotiationError) {
       return apiError(error.status, error.code, error.message);

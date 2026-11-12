@@ -271,7 +271,17 @@ export function ContractDetail({ contractId }: { contractId: string }) {
             {analysisBusy ? 'Reviewing…' : 'Review clauses'}
           </Button>
           {analysisError && <p className="text-sm text-red-800" role="alert">{analysisError}</p>}
-          {analysis && (
+          {analysis?.notice && (
+            <p className="border-l-2 border-mp-orange bg-mp-app-bg px-4 py-3 text-sm" role="status">
+              {analysis.notice}
+            </p>
+          )}
+          {analysis?.requiresHumanReview && (
+            <p className="text-xs text-mp-medium-grey">
+              Human review required. Model confidence is not calibrated.
+            </p>
+          )}
+          {analysis?.analysis && (
             <div className="space-y-3 border-t border-mp-warm-grey pt-4" aria-live="polite">
               <p className="text-sm">{analysis.analysis.summary}</p>
               {analysis.analysis.clauses.length === 0 && (

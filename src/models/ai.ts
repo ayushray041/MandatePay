@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { mandateCurrencySchema } from '@/models/mandate';
 import {
   negotiationOfferTermsSchema,
 } from '@/models/negotiation';
@@ -13,6 +14,16 @@ export const negotiationIntelligenceRequestSchema = z.discriminatedUnion('action
     terms: negotiationOfferTermsSchema,
   }).strict(),
 ]);
+
+const aiAdvisoryMetadataShape = {
+  confidenceScore: z.number().min(0).max(1).nullable().optional(),
+  confidenceMethod: z.enum([
+    'sample_size_heuristic',
+    'not_calibrated',
+    'deterministic_rule',
+  ]).optional(),
+  requiresHumanReview: z.boolean().optional(),
+};
 
 export const negotiationRecommendationModelSchema = z.object({
   summary: z.string().trim().min(1).max(600),
@@ -41,12 +52,14 @@ export const negotiationRecommendationResponseSchema = z.object({
   counterofferValidation: z.enum(['not_proposed', 'valid', 'rejected']),
   counterofferRejectionReason: z.string().nullable(),
   notice: z.string().nullable(),
+  ...aiAdvisoryMetadataShape,
 }).strict();
 
 export const mandateExplanationResponseSchema = z.object({
   action: z.literal('explain_violation'),
   source: z.literal('deterministic'),
   mandateAssessment: mandateAssessmentSchema,
+  ...aiAdvisoryMetadataShape,
 }).strict();
 
 export const aiOfferComparisonModelSchema = z.object({
@@ -79,6 +92,7 @@ export const offerComparisonResponseSchema = z.object({
     mandateReasons: z.array(z.string().max(300)).max(10),
   }).strict()).max(20),
   notice: z.string().nullable(),
+  ...aiAdvisoryMetadataShape,
 }).strict();
 
 export const negotiationAnalysisModelSchema = z.object({
@@ -121,6 +135,7 @@ export const negotiationAnalysisResponseSchema = z.object({
   }).strict(),
   analysis: negotiationAnalysisModelSchema.nullable(),
   notice: z.string().nullable(),
+  ...aiAdvisoryMetadataShape,
 }).strict();
 
 export const negotiationSummaryModelSchema = z.object({
@@ -140,6 +155,7 @@ export const negotiationSummaryResponseSchema = z.object({
     totalEvents: z.number().int().nonnegative(),
   }).strict(),
   notice: z.string().nullable(),
+  ...aiAdvisoryMetadataShape,
 }).strict();
 
 export const contractAnalysisModelSchema = z.object({
@@ -160,9 +176,111 @@ export const contractAnalysisModelSchema = z.object({
 
 export const contractAnalysisResponseSchema = z.object({
   action: z.literal('analyze'),
-  source: z.literal('gemini'),
-  analysis: contractAnalysisModelSchema,
+  source: z.enum(['gemini', 'deterministic']),
+  analysis: contractAnalysisModelSchema.nullable(),
+  notice: z.string().nullable(),
   disclaimer: z.literal('AI-generated review aid only; not legal advice or a determination of enforceability.'),
+  ...aiAdvisoryMetadataShape,
+}).strict();
+
+export const aiRiskSignalSchema = z.object({
+  code: z.string().min(1).max(80),
+  severity: z.enum(['informational', 'medium', 'high']),
+  explanation: z.string().min(1).max(400),
+  evidence: z.array(z.string().max(200)).max(8),
+}).strict();
+
+export const aiRiskAssessmentSchema = z.object({
+  action: z.enum([
+    'payment_anomaly',
+    'spending_forecast',
+    'vendor_risk',
+    'agent_behavior',
+  ]),
+  source: z.literal('deterministic'),
+  riskScore: z.number().int().min(0).max(100).nullable(),
+  riskLevel: z.enum(['low', 'medium', 'high', 'insufficient_data']),
+  confidence: z.object({
+    score: z.number().min(0).max(1),
+    method: z.literal('sample_size_heuristic'),
+  }).strict(),
+  requiresHumanReview: z.boolean(),
+  summary: z.string().min(1).max(500),
+  signals: z.array(aiRiskSignalSchema).max(10),
+  evidence: z.object({
+    sampleSize: z.number().int().nonnegative(),
+    observationWindowDays: z.number().int().positive(),
+  }).strict(),
+  priceEstimate: z.object({
+    medianMinor: z.number().int().positive(),
+    lowMinor: z.number().int().positive(),
+    highMinor: z.number().int().positive(),
+    currency: z.string().length(3),
+    sampleSize: z.number().int().min(3),
+    basis: z.literal('observed_completed_payments_only'),
+  }).strict().nullable(),
+  spendingForecast: z.object({
+    projectedSpendMinor: z.number().int().nonnegative(),
+    currency: z.string().length(3),
+    horizonDays: z.number().int().positive(),
+    sampleSize: z.number().int().positive(),
+    basis: z.literal('historical_daily_average'),
+  }).strict().nullable(),
+}).strict();
+
+export const aiRiskRequestSchema = z.discriminatedUnion('action', [
+  z.object({
+    action: z.literal('payment_anomaly'),
+    paymentId: z.string().trim().min(1).max(128).refine((id) => !id.includes('/')),
+  }).strict(),
+  z.object({
+    action: z.literal('spending_forecast'),
+    currency: mandateCurrencySchema,
+  }).strict(),
+  z.object({
+    action: z.literal('vendor_risk'),
+    vendorId: z.string().trim().min(1).max(128).refine((id) => !id.includes('/')),
+    currency: mandateCurrencySchema,
+  }).strict(),
+  z.object({ action: z.literal('agent_behavior') }).strict(),
+]);
+
+export const aiHistoryActionSchema = z.enum([
+  'negotiation_recommendation',
+  'offer_comparison',
+  'negotiation_summary',
+  'negotiation_analysis',
+  'contract_analysis',
+  'mandate_explanation',
+  'payment_anomaly',
+  'spending_forecast',
+  'vendor_risk',
+  'agent_behavior',
+]);
+
+export const aiDecisionHistoryEntrySchema = z.object({
+  id: z.string().min(1),
+  action: aiHistoryActionSchema,
+  resourceType: z.enum(['negotiation', 'contract', 'payment', 'agent']),
+  resourceId: z.string().min(1),
+  source: z.enum(['gemini', 'deterministic']),
+  providerId: z.string().nullable(),
+  modelVersion: z.string().nullable(),
+  promptVersion: z.string().min(1),
+  confidenceScore: z.number().min(0).max(1).nullable(),
+  confidenceMethod: z.enum([
+    'sample_size_heuristic',
+    'not_calibrated',
+    'deterministic_rule',
+  ]),
+  requiresHumanReview: z.boolean(),
+  evidence: z.array(z.object({
+    type: z.string().min(1).max(80),
+    reference: z.string().max(160),
+    sampleSize: z.number().int().nonnegative().nullable(),
+  }).strict()).max(20),
+  result: z.unknown(),
+  createdAt: z.string().nullable(),
 }).strict();
 
 export const negotiationIntelligenceResponseSchema = z.discriminatedUnion('action', [
@@ -181,4 +299,6 @@ export type OfferComparisonResponse = z.infer<typeof offerComparisonResponseSche
 export type NegotiationSummaryResponse = z.infer<typeof negotiationSummaryResponseSchema>;
 export type NegotiationAnalysisResponse = z.infer<typeof negotiationAnalysisResponseSchema>;
 export type ContractAnalysisResponse = z.infer<typeof contractAnalysisResponseSchema>;
+export type AiRiskAssessment = z.infer<typeof aiRiskAssessmentSchema>;
+export type AiDecisionHistoryEntry = z.infer<typeof aiDecisionHistoryEntrySchema>;
 export type NegotiationIntelligenceResponse = z.infer<typeof negotiationIntelligenceResponseSchema>;

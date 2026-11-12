@@ -4,14 +4,22 @@ const mocks = vi.hoisted(() => ({
   authenticateRequest: vi.fn(),
   documents: new Map<string, Record<string, unknown>>(),
   generateStructured: vi.fn(),
+  recordAiDecision: vi.fn(),
+  consumeAiRequestQuota: vi.fn(),
   uid: 'user-a',
 }));
 
 vi.mock('@/lib/api/auth', () => ({
   authenticateRequest: mocks.authenticateRequest,
 }));
-vi.mock('@/lib/ai/gemini', () => ({
+vi.mock('@/lib/ai/factory', () => ({
   createAiProvider: () => ({ generateStructured: mocks.generateStructured }),
+}));
+vi.mock('@/lib/ai/history', () => ({
+  recordAiDecision: mocks.recordAiDecision,
+}));
+vi.mock('@/lib/ai/usage', () => ({
+  consumeAiRequestQuota: mocks.consumeAiRequestQuota,
 }));
 vi.mock('@/lib/firebase/admin', () => ({
   adminFirestore: {

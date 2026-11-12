@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ContractTerms } from '@/models/contract';
 import { analyzeContractTerms } from '@/lib/ai/contract-analysis';
+import { AiProviderError } from '@/lib/ai/provider';
 
 const terms: ContractTerms = {
   parties: [
@@ -73,6 +74,22 @@ describe('contract clause analysis', () => {
     };
     await expect(analyzeContractTerms(provider, terms)).rejects.toMatchObject({
       code: 'AI_INVALID_OUTPUT',
+    });
+  });
+
+  it('returns an explicit non-fabricated review fallback when the provider is unavailable', async () => {
+    const provider = {
+      generateStructured: vi.fn().mockRejectedValue(
+        new AiProviderError('AI_PROVIDER_UNAVAILABLE', 'Unavailable'),
+      ),
+    };
+    const result = await analyzeContractTerms(provider, terms);
+
+    expect(result).toMatchObject({
+      source: 'deterministic',
+      analysis: null,
+      notice: expect.stringContaining('no clause analysis'),
+      disclaimer: expect.stringContaining('not legal advice'),
     });
   });
 });

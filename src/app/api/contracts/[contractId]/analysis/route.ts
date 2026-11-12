@@ -3,7 +3,10 @@ import { authenticateRequest } from '@/lib/api/auth';
 import { apiError, apiSuccess } from '@/lib/api/responses';
 import { aiErrorResponse, AiRequestError } from '@/lib/ai/errors';
 import { analyzeContractTerms } from '@/lib/ai/contract-analysis';
-import { createAiProvider } from '@/lib/ai/gemini';
+import { createAiProvider } from '@/lib/ai/factory';
+import { recordAiDecision } from '@/lib/ai/history';
+import { attachHumanReviewMetadata } from '@/lib/ai/review';
+import { consumeAiRequestQuota } from '@/lib/ai/usage';
 import { ContractError } from '@/lib/contracts/errors';
 import { assertContractParty } from '@/lib/contracts/policy';
 import { formatContract, formatContractVersion } from '@/lib/contracts/format';
@@ -40,7 +43,31 @@ export async function POST(request: Request, context: RouteContext) {
       throw new AiRequestError(409, 'CURRENT_VERSION_MISMATCH', 'The current contract version could not be verified.');
     }
 
-    return apiSuccess(await analyzeContractTerms(createAiProvider(), version.terms));
+    const userId = authentication.user.uid;
+    await consumeAiRequestQuota(userId);
+    const provider = createAiProvider();
+    const result = attachHumanReviewMetadata(await analyzeContractTerms(provider, version.terms));
+    await recordAiDecision({
+      userId,
+      action: 'contract_analysis',
+      resourceType: 'contract',
+      resourceId: contractId,
+      source: result.source,
+      providerId: provider.metadata?.providerId ?? 'gemini',
+      modelVersion: provider.metadata?.modelVersion ?? (process.env.GEMINI_MODEL?.trim() || 'unreported'),
+      promptVersion: 'contract-analysis-v1',
+      confidenceScore: null,
+      confidenceMethod: 'not_calibrated',
+      requiresHumanReview: true,
+      evidence: [{
+        type: 'contract_version',
+        reference: version.id,
+        sampleSize: 1,
+      }],
+      result,
+      provider,
+    });
+    return apiSuccess(result);
   } catch (error: unknown) {
     if (error instanceof ContractError) {
       return apiError(error.status, error.code, error.message);

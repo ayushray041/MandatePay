@@ -33,6 +33,10 @@ or production-ready.
 - Add production-grade monitoring for authentication availability, Firestore errors, webhook
   retries, provider timeouts, stale reservations, and failed financial state transitions. Exclude
   credentials, prompts, and commercial content from logs.
+- Before enabling broad AI use, configure provider account-level spend limits/alerts, set a retention
+  policy for private AI recommendation history, and evaluate the heuristics against a reviewed,
+  representative dataset. Current test fixtures are synthetic and do not establish predictive
+  performance.
 - Establish an operational runbook for provider incidents, key rotation, backups, restore tests, and
   financial reconciliation.
 

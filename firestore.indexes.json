@@ -165,6 +165,14 @@
       ]
     },
     {
+      "collectionGroup": "aiDecisionHistory",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "actorUserId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "amendments",
       "queryScope": "COLLECTION",
       "fields": [

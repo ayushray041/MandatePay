@@ -34,10 +34,10 @@ mean validated against deployed services or by end-to-end browser tests.
 | Negotiation offers, transitions, owner approvals, and budget reservations | Complete and tested | Tests cover transitions, duplicate decisions, owner-only approvals, required approvals, and serialized competing reservations. The concurrency tests use a Firestore test double, not the emulator. |
 | Contract generation, approval, amendment, and version history | Complete and tested | API tests cover accepted-negotiation requirements, duplicate generation, participant review, reservation release, amendment capacity, and immutable versions. |
 | Payment authorization, capture, cancellation, refund, and webhook reconciliation | Partially implemented | Sandbox workflow and mocked API/webhook tests cover amount derivation, payer authorization, cancellation safeguards, signatures, replay handling, and ledger reconciliation. Provider calls were not made with credentials; real-money processing is absent. |
-| Negotiation and contract AI assistance | Implemented but untested | Deterministic policy checks and provider error cases have automated tests; no live Gemini call was made. |
+| AI decision, risk, and recommendation history | Implemented and unit/API tested; not production-verified | Deterministic risk evaluation, provider failures/fallbacks, caller isolation, per-user LLM request limits, and private history have automated tests. No live Gemini, cost, or predictive-quality evaluation was performed; LLM confidence is not calibrated. |
 | Dashboard, projects, mandates, negotiations, contracts, amendments, and payments pages | Implemented but untested end-to-end | App Router pages and workflow components exist. No browser-level workflow suite was run. |
 | Firestore schema, indexes, and security rules | Implemented but untested | Rules and composite indexes are checked in. Rules tests exist but were skipped without an emulator; deployment to a Firebase project was not verified. |
-| Expiry scheduling and reservation recovery | Missing | Negotiation expiry is recorded on mutation, not by a scheduled worker. There is no general recovery/settlement worker for abandoned reservations. |
+| Expiry scheduling and reservation recovery | Partially implemented | A bounded, credential-protected negotiation expiry endpoint exists, but no production scheduler is configured. There is no general recovery/settlement worker for abandoned reservations. |
 | Real-money payments, payouts, and external service execution | Missing | Current payment adapter is fixed to PayPal sandbox. Mandate operation authorization records approval; it does not execute the underlying operation. |
 | Release security and operations controls | Security concern | No confirmed exploitable vulnerability was identified, but dependency advisories, unverified deployed rules/IAM, and unresolved reservation expiry require action before production. |
 
@@ -63,11 +63,14 @@ Validation run from the repository root after the code and documentation changes
 
 - `npx tsc --noEmit`: passed.
 - `npm run lint`: passed.
-- `npm test`: passed — 26 files passed, 1 skipped; 120 tests passed, 3 skipped.
+- `npm test`: passed — 39 files passed, 1 skipped; 184 tests passed, 4 skipped.
 - `npm run build`: passed; all App Router API and page routes were generated.
-- Firestore emulator rules tests: skipped because `FIRESTORE_EMULATOR_HOST` was not configured.
+- `npm run test:rules`: could not start because no Java runtime is available for the Firebase emulator. The corresponding rules test file was skipped by `npm test` because `FIRESTORE_EMULATOR_HOST` was not configured.
 - Live Firebase, PayPal, and Gemini checks: not run. Build-time client configuration is not proof of
   live service connectivity.
+- AI risk evaluation fixtures are synthetic test cases only; no model was trained. Provider token
+  costs are estimates from operator-supplied rates, and a global spend cap and history TTL policy
+  are not configured.
 
 ## Release blockers and follow-up
 
@@ -84,3 +87,5 @@ Validation run from the repository root after the code and documentation changes
 5. Add browser E2E coverage for signup/login, owner approval, contract review, and payment lifecycle.
 6. Define production operations: secret provisioning/rotation, monitoring and alerting, backup and
    restore checks, incident response, and provider reconciliation ownership.
+7. Set provider account-level AI budgets/alerts and an approved retention/TTL policy for
+    `aiDecisionHistory` before enabling broad AI usage.

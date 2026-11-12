@@ -73,10 +73,13 @@ approval and ledger updates.
 - **Marketplace metrics:** Capture success/failure aggregates are updated with deduplication
   receipts in the same Firestore transaction as payment reconciliation. Metrics are informational
   and do not authorize a transaction or establish a service guarantee.
-- **Negotiation AI:** Model analysis, price comparisons, strategies, and outcome predictions are
-  advisory only. Counteroffers are not submitted automatically; mandate authorization and explicit
-  owner approval remain deterministic. Price references are derived from offers in the negotiation
-  and are not represented as external market data.
+- **AI decision and risk intelligence:** Negotiation/contract output is strict-schema validated,
+  advisory, and marked for human review; no model tools or financial mutation paths are exposed.
+  Risk analysis uses caller-scoped server records and deterministic thresholds. Sample-size
+  confidence is not a calibrated probability. Provider telemetry excludes prompt/content data;
+  structured results and bounded evidence references are stored in server-only, caller-scoped
+  history. History currently has no automatic retention cleanup and needs an approved retention
+  policy before production.
 
 ## Residual risks and verification gaps
 
@@ -106,6 +109,10 @@ approval and ledger updates.
 8. **Marketplace search scale:** Discovery scans a bounded window of up to 500 recent listings and
    reports when that window is full. Search is not exhaustive at larger catalog sizes; indexed
    filters and cursor pagination are required before relying on it as a large-scale directory.
+9. **AI operational controls:** Gemini is the only bundled provider adapter. Token-cost telemetry
+   is an estimate and requires operator-supplied rates; no global spend ceiling or live-provider
+   cost/performance evaluation is configured. The per-user daily request quota is not a substitute
+   for provider account-level budgets and alerting.
 
 ## Assessment outcome
 

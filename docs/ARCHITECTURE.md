@@ -38,10 +38,11 @@ Zod, and performs authorized Firestore operations with the Firebase Admin SDK.
    manage authorization, capture, cancellation, and full-refund transitions. Verified provider
    webhooks reconcile payment state and mandate ledgers transactionally; durable event receipts
    prevent duplicate processing.
-8. **Negotiation intelligence** — a server-only Gemini provider supports recommendations, offer
-   commentary, history summaries, and contract-clause review. Responses are strict-Zod validated;
-   offer suggestions are independently checked against the requesting agent's mandate. No model
-   tools, payment APIs, mandate mutation APIs, or approval actions are available to the provider.
+8. **AI decision and risk intelligence** — domain services use a provider-independent structured
+   output interface and server-side factory; Gemini is the only bundled LLM adapter. Deterministic
+   risk services analyze caller-visible payment and agent history without claiming trained-model
+   performance. Strict schemas, a per-user daily LLM quota, private caller-scoped recommendation
+   history, and token/cost telemetry bound and explain advisory calls.
 
 ### Negotiation and budget guarantees
 
@@ -75,8 +76,14 @@ Zod, and performs authorized Firestore operations with the Firebase Admin SDK.
   never inserted into system instructions. Contract-analysis excerpts must match the current
   immutable version, and its disclaimer is fixed by the server.
 - AI is advisory only. Mandate and state checks remain deterministic, approval requirements are
-  surfaced, and no AI response is persisted or applied automatically. Provider outages never result
-  in invented model output; safe deterministic metrics remain labeled as such.
+  surfaced, and no AI response is applied automatically. Provider outages never result in invented
+  model output; safe deterministic metrics remain labeled as such. Validated structured results
+  and evidence references are persisted to private caller-scoped history, while prompts and raw
+  contract/offer source text are not persisted.
+- Provider confidence is not calibrated and is not presented as a probability. Risk confidence is
+  only a documented sample-size heuristic; uncertain and model-produced recommendations require
+  human review. Cost estimates require operator-supplied token prices and are not invoices.
+- Synthetic test evaluation cases are not training data; no MandatePay ML model has been trained.
 - Payment initiation consumes the existing accepted-contract reservation; it does not reserve the
   amount a second time. Capture transactionally consumes both reservations and adds spending to
   the payer mandate only after PayPal confirms completion. Cancellation releases both reservations
@@ -110,7 +117,8 @@ Zod, and performs authorized Firestore operations with the Firebase Admin SDK.
 - AI endpoints independently authenticate and authorize negotiation or contract participants.
   Provider keys stay server-side; structured logs exclude prompts, model output, IDs, and commercial
   text. Calls have a timeout and bounded output; untrusted text is sent without tools or execution
-  authority.
+  authority. Result history is server-only and caller-scoped. Risk APIs derive payment/activity
+  evidence from server-side records; client-provided amounts are rejected.
 - PayPal mode is fixed to sandbox in the server adapter; client credentials, webhook verification,
   and provider calls are never exposed to the browser. The project has not performed real or
   credential-backed financial transactions.

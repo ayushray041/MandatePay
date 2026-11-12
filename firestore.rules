@@ -35,6 +35,14 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /aiDecisionHistory/{entryId} {
+      allow read, write: if false;
+    }
+
+    match /aiUsage/{usageId} {
+      allow read, write: if false;
+    }
+
     match /agentWebhooks/{webhookId} {
       allow read, write: if false;
     }
