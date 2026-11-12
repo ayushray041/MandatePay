@@ -112,8 +112,10 @@ export function MandateDetail({ mandateId }: { mandateId: string }) {
       await action();
       setNotice(successMessage);
       await load(false);
+      return true;
     } catch (caughtError: unknown) {
       setError(caughtError instanceof Error ? caughtError.message : 'The mandate action failed.');
+      return false;
     } finally {
       setBusy(false);
     }
@@ -136,7 +138,7 @@ export function MandateDetail({ mandateId }: { mandateId: string }) {
       return;
     }
 
-    await runAction(
+    const succeeded = await runAction(
       () => createMandateAuthorization(mandate.id, {
         operation: String(formData.get('operation') ?? ''),
         amountMinor,
@@ -144,7 +146,9 @@ export function MandateDetail({ mandateId }: { mandateId: string }) {
       }),
       'Operation request submitted. The backend checked the mandate rules and budget.',
     );
-    form.reset();
+    if (succeeded) {
+      form.reset();
+    }
   };
 
   const handleLimitRequest = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -164,7 +168,7 @@ export function MandateDetail({ mandateId }: { mandateId: string }) {
       return;
     }
 
-    await runAction(
+    const succeeded = await runAction(
       () => requestMandateLimitIncrease(
         mandate.id,
         requestedLimitMinor,
@@ -172,7 +176,9 @@ export function MandateDetail({ mandateId }: { mandateId: string }) {
       ),
       'Spending-limit increase request submitted for owner approval.',
     );
-    form.reset();
+    if (succeeded) {
+      form.reset();
+    }
   };
 
   if (loading) {

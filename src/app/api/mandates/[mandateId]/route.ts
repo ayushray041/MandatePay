@@ -102,17 +102,6 @@ export async function PATCH(request: Request, context: RouteContext) {
   const firestore = adminFirestore;
   const mandateRef = firestore.collection('mandates').doc(mandateId);
   try {
-    if (parsed.data.authorizedAgentId) {
-      const agent = await firestore.collection('users').doc(parsed.data.authorizedAgentId).get();
-      if (!agent.exists) {
-        return apiError(
-          422,
-          'INVALID_AGENT',
-          'The authorized agent must have a registered user profile.',
-        );
-      }
-    }
-
     await firestore.runTransaction(async (transaction) => {
       const snapshot = await transaction.get(mandateRef);
       if (!snapshot.exists) {
@@ -131,6 +120,22 @@ export async function PATCH(request: Request, context: RouteContext) {
           'MANDATE_NOT_EDITABLE',
           'Only draft mandates can be edited.',
         );
+      }
+
+      if (
+        parsed.data.authorizedAgentId
+        && parsed.data.authorizedAgentId !== current.authorizedAgentId
+      ) {
+        const agent = await transaction.get(
+          firestore.collection('users').doc(parsed.data.authorizedAgentId),
+        );
+        if (!agent.exists) {
+          throw new MandateError(
+            422,
+            'INVALID_AGENT',
+            'The authorized agent must have a registered user profile.',
+          );
+        }
       }
 
       if (

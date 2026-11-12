@@ -15,6 +15,7 @@ import {
   parseMajorAmount,
 } from '@/lib/mandates/money';
 import {
+  mandateCurrencySchema,
   mandateCreateSchema,
   mandateOperations,
   type MandateOperation,
@@ -48,11 +49,20 @@ export function MandateForm({ initialMandate }: { initialMandate?: MandateRecord
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [currency, setCurrency] = useState(initialMandate?.currency ?? 'USD');
+  const supportedCurrency = mandateCurrencySchema.safeParse(currency).success;
+  const amountStep = supportedCurrency
+    ? 1 / 10 ** currencyFractionDigits(currency)
+    : 1;
   const now = new Date();
   const thirtyDaysFromNow = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const formData = new FormData(event.currentTarget);
+    if (!supportedCurrency) {
+      setError('Enter a supported three-letter ISO 4217 currency code.');
+      return;
+    }
+
     const spendingLimitMinor = amountFromForm(formData.get('spendingLimit'), currency);
     const ownerApprovalAboveMinor = amountFromForm(
       formData.get('ownerApprovalAbove'),
@@ -224,7 +234,7 @@ export function MandateForm({ initialMandate }: { initialMandate?: MandateRecord
                   type="number"
                   required
                   min="0"
-                  step={1 / 10 ** currencyFractionDigits(currency)}
+                  step={amountStep}
                   defaultValue={initialMandate
                     ? minorAmountInput(initialMandate.spendingLimitMinor, initialMandate.currency)
                     : undefined}
@@ -233,7 +243,7 @@ export function MandateForm({ initialMandate }: { initialMandate?: MandateRecord
               </div>
               {initialMandate && (
                 <span className="mt-1 block text-xs text-mp-medium-grey">
-                  Current limit: {formatMinorAmount(initialMandate.spendingLimitMinor, currency)}.
+                  Current limit: {formatMinorAmount(initialMandate.spendingLimitMinor, initialMandate.currency)}.
                   Increases require approval.
                 </span>
               )}
@@ -315,7 +325,7 @@ export function MandateForm({ initialMandate }: { initialMandate?: MandateRecord
                 name="ownerApprovalAbove"
                 type="number"
                 min="0"
-                step={1 / 10 ** currencyFractionDigits(currency)}
+                step={amountStep}
                 defaultValue={initialMandate?.approvalRequirements.ownerApprovalAboveMinor === undefined
                   ? undefined
                   : minorAmountInput(initialMandate.approvalRequirements.ownerApprovalAboveMinor, initialMandate.currency)}
@@ -340,7 +350,7 @@ export function MandateForm({ initialMandate }: { initialMandate?: MandateRecord
                 name="maximumOperationAmount"
                 type="number"
                 min="0"
-                step={1 / 10 ** currencyFractionDigits(currency)}
+                step={amountStep}
                 defaultValue={initialMandate?.executionConditions.maximumOperationAmountMinor === undefined
                   ? undefined
                   : minorAmountInput(initialMandate.executionConditions.maximumOperationAmountMinor, initialMandate.currency)}

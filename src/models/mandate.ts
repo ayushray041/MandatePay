@@ -19,6 +19,14 @@ export const mandateOperations = [
 export const mandateOperationSchema = z.enum(mandateOperations);
 
 const minorUnitAmountSchema = z.number().int().positive().max(100_000_000_000);
+const supportedCurrencyCodes = new Set(Intl.supportedValuesOf('currency'));
+export const mandateCurrencySchema = z
+  .string()
+  .regex(/^[A-Z]{3}$/, 'Currency must be a three-letter uppercase code.')
+  .refine(
+    (currency) => supportedCurrencyCodes.has(currency),
+    'Currency must be a supported ISO 4217 code.',
+  );
 
 export const mandateApprovalRequirementsSchema = z
   .object({
@@ -39,7 +47,7 @@ const mandateFieldsSchema = z.object({
     description: z.string().trim().min(1).max(4000),
     authorizedAgentId: z.string().trim().min(1).max(128),
     spendingLimitMinor: minorUnitAmountSchema,
-    currency: z.string().regex(/^[A-Z]{3}$/, 'Currency must be a three-letter uppercase code.'),
+    currency: mandateCurrencySchema,
     startsAt: z.string().datetime({ offset: true }),
     expiresAt: z.string().datetime({ offset: true }),
     allowedOperations: z.array(mandateOperationSchema).min(1).max(mandateOperations.length),
@@ -129,7 +137,7 @@ export const mandateRecordSchema = z
     description: z.string(),
     spendingLimitMinor: minorUnitAmountSchema,
     spentAmountMinor: z.number().int().nonnegative(),
-    currency: z.string(),
+    currency: mandateCurrencySchema,
     startsAt: z.string().nullable(),
     expiresAt: z.string().nullable(),
     allowedOperations: z.array(mandateOperationSchema),
@@ -158,7 +166,7 @@ export const mandateAuthorizationRecordSchema = z
     authorizedAgentId: z.string().min(1),
     operation: mandateOperationSchema,
     amountMinor: minorUnitAmountSchema,
-    currency: z.string(),
+    currency: mandateCurrencySchema,
     description: z.string(),
     status: z.enum(['pending_approval', 'approved', 'rejected']),
     createdAt: z.string().nullable(),

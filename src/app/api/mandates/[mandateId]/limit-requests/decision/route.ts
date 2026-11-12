@@ -4,7 +4,7 @@ import { apiError, apiSuccess } from '@/lib/api/responses';
 import { getServerTimestamp } from '@/lib/firebase/firestore';
 import { writeMandateAuditEvent } from '@/lib/mandates/audit';
 import { MandateError, mandateErrorResponse } from '@/lib/mandates/errors';
-import { assertOwner, mandateStatus } from '@/lib/mandates/policy';
+import { assertNotExpired, assertOwner, mandateStatus } from '@/lib/mandates/policy';
 import { mandateLimitDecisionSchema } from '@/models/mandate';
 
 type RouteContext = { params: Promise<{ mandateId: string }> };
@@ -46,13 +46,6 @@ export async function POST(request: Request, context: RouteContext) {
         throw new Error('Mandate document has no data.');
       }
       assertOwner(mandate, authentication.user.uid);
-      if (['revoked', 'expired'].includes(mandateStatus(mandate))) {
-        throw new MandateError(
-          409,
-          'MANDATE_INACTIVE',
-          'Spending-limit requests cannot be approved for inactive mandates.',
-        );
-      }
 
       const pending = mandate.pendingLimitRequest;
       if (typeof pending !== 'object' || pending === null) {
@@ -67,6 +60,14 @@ export async function POST(request: Request, context: RouteContext) {
       }
 
       if (parsed.data.decision === 'approve') {
+        if (['revoked', 'expired'].includes(mandateStatus(mandate))) {
+          throw new MandateError(
+            409,
+            'MANDATE_INACTIVE',
+            'Spending-limit requests cannot be approved for inactive mandates.',
+          );
+        }
+        assertNotExpired(mandate, new Date());
         const requestedLimitMinor = pending.requestedLimitMinor;
         if (typeof requestedLimitMinor !== 'number' || requestedLimitMinor <= mandate.spendingLimitMinor) {
           throw new MandateError(409, 'INVALID_LIMIT_REQUEST', 'Pending spending-limit request is invalid.');
