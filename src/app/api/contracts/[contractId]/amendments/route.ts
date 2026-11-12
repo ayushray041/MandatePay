@@ -44,7 +44,10 @@ export async function POST(request: Request, context: RouteContext) {
   const now = new Date();
   try {
     const amendment = await firestore.runTransaction(async (transaction) => {
-      const contractSnapshot = await transaction.get(contractRef);
+      const [contractSnapshot, paymentSnapshot] = await Promise.all([
+        transaction.get(contractRef),
+        transaction.get(firestore.collection('payments').doc(contractId)),
+      ]);
       if (!contractSnapshot.exists) {
         throw new ContractError(404, 'CONTRACT_NOT_FOUND', 'Contract was not found.');
       }
@@ -55,6 +58,13 @@ export async function POST(request: Request, context: RouteContext) {
       assertContractParty(contract, uid);
       if (contract.status !== 'active') {
         throw new ContractError(409, 'CONTRACT_NOT_ACTIVE', 'Only an active contract can be amended.');
+      }
+      if (paymentSnapshot.exists && paymentSnapshot.data()?.status !== 'cancelled') {
+        throw new ContractError(
+          409,
+          'PAYMENT_IN_PROGRESS',
+          'A contract cannot be amended while its payment is active or complete.',
+        );
       }
       if (contract.activeAmendmentId) {
         throw new ContractError(409, 'AMENDMENT_ALREADY_PENDING', 'Resolve the current amendment before proposing another.');

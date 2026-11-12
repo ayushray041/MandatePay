@@ -123,7 +123,7 @@ describe('PayPal sandbox provider', () => {
       },
     }));
     expect(mocks.createOrder).toHaveBeenCalledWith(expect.objectContaining({
-      paypalRequestId: 'mandatepay-payment-abc123-create',
+      paypalRequestId: expect.stringMatching(/^mp-[a-f0-9]{32}-create-1$/),
       body: expect.objectContaining({
         intent: 'AUTHORIZE',
         purchaseUnits: [expect.objectContaining({
@@ -190,10 +190,10 @@ describe('PayPal sandbox provider', () => {
     })).resolves.toEqual({ refundId: 'REFUND123', status: 'COMPLETED' });
 
     expect(mocks.voidPayment).toHaveBeenCalledWith(expect.objectContaining({
-      paypalRequestId: 'mandatepay-payment-abc123-void',
+      paypalRequestId: expect.stringMatching(/^mp-[a-f0-9]{32}-void-1$/),
     }));
     expect(mocks.refundCapturedPayment).toHaveBeenCalledWith(expect.objectContaining({
-      paypalRequestId: 'mandatepay-payment-abc123-refund',
+      paypalRequestId: expect.stringMatching(/^mp-[a-f0-9]{32}-refund-1$/),
     }));
   });
 

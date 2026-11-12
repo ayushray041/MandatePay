@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import {
   CheckoutPaymentIntent,
   Client,
@@ -28,17 +29,17 @@ export type PayPalOrderDetails = {
 
 export type PayPalAuthorizationDetails = {
   authorizationId: string;
-  status: 'CREATED' | 'PENDING';
+  status: 'CREATED' | 'PENDING' | 'DENIED';
 };
 
 export type PayPalCaptureDetails = {
   captureId: string;
-  status: 'COMPLETED' | 'PENDING';
+  status: 'COMPLETED' | 'PENDING' | 'FAILED' | 'DECLINED';
 };
 
 export type PayPalRefundDetails = {
   refundId: string;
-  status: 'COMPLETED' | 'PENDING';
+  status: 'COMPLETED' | 'PENDING' | 'FAILED';
 };
 
 function getCredentials() {
@@ -107,8 +108,17 @@ function getApplicationBaseUrl(): URL {
   return baseUrl;
 }
 
-function requestIdentifier(paymentId: string, operation: string): string {
-  return `mandatepay-${paymentId}-${operation}`;
+function requestIdentifier(
+  paymentId: string,
+  operation: string,
+  attempt = 1,
+  paymentCycle = '',
+): string {
+  if (!Number.isSafeInteger(attempt) || attempt < 1) {
+    throw new PaymentProviderError('INVALID_PROVIDER_ATTEMPT', 'Provider operation attempt is invalid.');
+  }
+  const paymentKey = createHash('sha256').update(`${paymentId}:${paymentCycle}`).digest('hex').slice(0, 32);
+  return `mp-${paymentKey}-${operation}-${attempt}`;
 }
 
 const moneyResponseSchema = z.object({
@@ -121,6 +131,8 @@ export async function createPayPalOrder(input: {
   amountMinor: number;
   currency: string;
   description: string;
+  attempt?: number;
+  paymentCycle?: string;
 }): Promise<PayPalOrderDetails> {
   const client = createSandboxClient();
   const baseUrl = getApplicationBaseUrl();
@@ -151,7 +163,7 @@ export async function createPayPalOrder(input: {
           cancelUrl: cancelUrl.toString(),
         },
       },
-      paypalRequestId: requestIdentifier(input.paymentId, 'create'),
+      paypalRequestId: requestIdentifier(input.paymentId, 'create', input.attempt, input.paymentCycle),
       prefer: 'return=representation',
     });
     const order = response.result;
@@ -195,7 +207,7 @@ export async function createPayPalOrder(input: {
 
 const authorizationResponseSchema = z.object({
   id: z.string().min(1),
-  status: z.enum(['CREATED', 'PENDING']),
+  status: z.enum(['CREATED', 'PENDING', 'DENIED']),
   amount: moneyResponseSchema,
 }).passthrough();
 
@@ -204,11 +216,13 @@ export async function authorizePayPalOrder(input: {
   orderId: string;
   amountMinor: number;
   currency: string;
+  attempt?: number;
+  paymentCycle?: string;
 }): Promise<PayPalAuthorizationDetails> {
   try {
     const response = await new OrdersController(createSandboxClient()).authorizeOrder({
       id: input.orderId,
-      paypalRequestId: requestIdentifier(input.paymentId, 'authorize'),
+      paypalRequestId: requestIdentifier(input.paymentId, 'authorize', input.attempt, input.paymentCycle),
       prefer: 'return=representation',
     });
     const authorization = response.result.purchaseUnits?.[0]?.payments?.authorizations?.[0];
@@ -240,7 +254,7 @@ export async function authorizePayPalOrder(input: {
 
 const captureResponseSchema = z.object({
   id: z.string().min(1),
-  status: z.enum(['COMPLETED', 'PENDING']),
+  status: z.enum(['COMPLETED', 'PENDING', 'FAILED', 'DECLINED']),
   amount: moneyResponseSchema,
 }).passthrough();
 
@@ -249,11 +263,13 @@ export async function capturePayPalAuthorization(input: {
   authorizationId: string;
   amountMinor: number;
   currency: string;
+  attempt?: number;
+  paymentCycle?: string;
 }): Promise<PayPalCaptureDetails> {
   try {
     const response = await new PaymentsController(createSandboxClient()).captureAuthorizedPayment({
       authorizationId: input.authorizationId,
-      paypalRequestId: requestIdentifier(input.paymentId, 'capture'),
+      paypalRequestId: requestIdentifier(input.paymentId, 'capture', input.attempt, input.paymentCycle),
       prefer: 'return=representation',
       body: { finalCapture: true },
     });
@@ -285,18 +301,20 @@ export async function capturePayPalAuthorization(input: {
 
 const refundResponseSchema = z.object({
   id: z.string().min(1),
-  status: z.enum(['COMPLETED', 'PENDING']),
+  status: z.enum(['COMPLETED', 'PENDING', 'FAILED']),
 }).passthrough();
 
 export async function refundPayPalCapture(input: {
   paymentId: string;
   captureId: string;
   reason: string;
+  attempt?: number;
+  paymentCycle?: string;
 }): Promise<PayPalRefundDetails> {
   try {
     const response = await new PaymentsController(createSandboxClient()).refundCapturedPayment({
       captureId: input.captureId,
-      paypalRequestId: requestIdentifier(input.paymentId, 'refund'),
+      paypalRequestId: requestIdentifier(input.paymentId, 'refund', input.attempt, input.paymentCycle),
       prefer: 'return=representation',
       body: { noteToPayer: input.reason.slice(0, 200) },
     });
@@ -322,11 +340,13 @@ export async function refundPayPalCapture(input: {
 export async function voidPayPalAuthorization(input: {
   paymentId: string;
   authorizationId: string;
+  attempt?: number;
+  paymentCycle?: string;
 }): Promise<void> {
   try {
     const response = await new PaymentsController(createSandboxClient()).voidPayment({
       authorizationId: input.authorizationId,
-      paypalRequestId: requestIdentifier(input.paymentId, 'void'),
+      paypalRequestId: requestIdentifier(input.paymentId, 'void', input.attempt, input.paymentCycle),
     });
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw new PaymentProviderError(

@@ -30,6 +30,13 @@ export const paymentRefundSchema = z.object({
   reason: z.string().trim().min(1).max(500),
 }).strict();
 
+export const paymentOperationSchema = z.enum([
+  'authorize',
+  'capture',
+  'cancel',
+  'refund',
+]);
+
 export const paymentRecordSchema = z.object({
   id: z.string().min(1),
   contractId: z.string().min(1),
@@ -41,13 +48,16 @@ export const paymentRecordSchema = z.object({
   payeeMandateId: z.string().min(1),
   amountMinor: z.number().int().positive().max(100_000_000_000),
   currency: mandateCurrencySchema,
+  serviceTitle: z.string().min(1).max(120),
   status: paymentStatusSchema,
   provider: z.literal('paypal'),
   providerOrderId: z.string().min(1).nullable(),
+  approvalUrl: z.string().url().nullable(),
   providerAuthorizationId: z.string().min(1).nullable(),
   providerCaptureId: z.string().min(1).nullable(),
   providerRefundId: z.string().min(1).nullable(),
-  idempotencyKeyHash: z.string().min(1),
+  pendingOperation: paymentOperationSchema.nullable(),
+  eventCount: z.number().int().positive(),
   mandateApproval: z.object({
     approverId: z.string().min(1),
     approvedAt: z.string().nullable(),
@@ -60,6 +70,7 @@ export const paymentRecordSchema = z.object({
     refund: z.number().int().nonnegative(),
   }).strict(),
   failureCode: z.string().nullable(),
+  cancellationReason: z.string().nullable(),
   receiptUrl: z.string().url().nullable(),
   authorizedAt: z.string().nullable(),
   completedAt: z.string().nullable(),
@@ -78,6 +89,8 @@ export const paymentEventSchema = z.object({
     'payment.authorization_started',
     'payment.authorized',
     'payment.capture_started',
+    'payment.cancel_started',
+    'payment.retry_started',
     'payment.completed',
     'payment.cancelled',
     'payment.refund_started',
