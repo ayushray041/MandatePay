@@ -58,8 +58,8 @@ function reference(kind: string, id: string) {
     }),
     collection: (name: string) => ({
       orderBy: () => ({
-        get: async () => ({
-          docs: name === 'offers'
+        get: async () => {
+          const docs: Array<{ id: string; data: () => Record<string, unknown> }> = name === 'offers'
             ? [
                 { id: 'offer-1', data: () => ({ sequence: 1, createdAt: new Date() }) },
                 { id: 'offer-2', data: () => ({ sequence: 2, createdAt: new Date() }) },
@@ -68,8 +68,19 @@ function reference(kind: string, id: string) {
                 { id: 'event-1', data: () => ({ sequence: 1, type: 'negotiation.created' }) },
                 { id: 'event-2', data: () => ({ sequence: 2, type: 'offer.submitted' }) },
                 { id: 'event-3', data: () => ({ sequence: 3, type: 'offer.countered' }) },
-              ],
-        }),
+              ];
+          if (name === 'events' && negotiation.status === 'pending_owner_approval') {
+            docs.push({
+              id: 'event-4',
+              data: () => ({
+                sequence: 4,
+                type: 'negotiation.owner_approved',
+                actorOwnerId: 'owner-1',
+              }),
+            });
+          }
+          return { docs };
+        },
       }),
     }),
   };
@@ -126,5 +137,51 @@ describe('negotiation history API', () => {
     expect(await response.json()).toMatchObject({
       error: { code: 'NEGOTIATION_NOT_FOUND' },
     });
+  });
+
+  it('lets only required owners view pending negotiations and redacts owner IDs from agents', async () => {
+    negotiation.status = 'pending_owner_approval';
+    Object.assign(negotiation, {
+      requiredOwnerApprovalIds: ['owner-1'],
+      ownerApprovals: [],
+    });
+    mocks.authenticateRequest.mockResolvedValue({
+      authenticated: true,
+      user: { uid: 'owner-1' },
+    });
+    const ownerResponse = await GET(
+      new Request('https://example.test/api/negotiations/negotiation-1'),
+      context,
+    );
+    const ownerPayload = await ownerResponse.json();
+    expect(ownerResponse.status).toBe(200);
+    expect(ownerPayload.data.negotiation.ownerApprovalRequiredForViewer).toBe(true);
+    expect(ownerPayload.data.negotiation).not.toHaveProperty('requiredOwnerApprovalIds');
+    expect(ownerPayload.data.negotiation).not.toHaveProperty('ownerApprovals');
+    expect(ownerPayload.data.events[3].actorOwnerId).toBe('owner-1');
+
+    mocks.authenticateRequest.mockResolvedValue({
+      authenticated: true,
+      user: { uid: 'agent-1' },
+    });
+    const agentResponse = await GET(
+      new Request('https://example.test/api/negotiations/negotiation-1'),
+      context,
+    );
+    const agentPayload = await agentResponse.json();
+    expect(agentResponse.status).toBe(200);
+    expect(agentPayload.data.negotiation).not.toHaveProperty('ownerApprovalRequiredForViewer');
+    expect(agentPayload.data.negotiation).not.toHaveProperty('ownerApprovals');
+    expect(agentPayload.data.events[3]).not.toHaveProperty('actorOwnerId');
+
+    mocks.authenticateRequest.mockResolvedValue({
+      authenticated: true,
+      user: { uid: 'owner-2' },
+    });
+    const unrelatedOwnerResponse = await GET(
+      new Request('https://example.test/api/negotiations/negotiation-1'),
+      context,
+    );
+    expect(unrelatedOwnerResponse.status).toBe(404);
   });
 });

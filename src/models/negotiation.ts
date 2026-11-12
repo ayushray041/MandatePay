@@ -6,6 +6,7 @@ export const negotiationStatuses = [
   'initiated',
   'offer_submitted',
   'counter_offered',
+  'pending_owner_approval',
   'accepted',
   'rejected',
   'expired',
@@ -57,6 +58,21 @@ export const negotiationDecisionSchema = z
     { path: ['reason'], message: 'A reason is only accepted for rejection.' },
   );
 
+export const negotiationOwnerApprovalSchema = z
+  .object({
+    decision: z.enum(['approve', 'reject']),
+    reason: z.string().trim().min(1).max(1000).optional(),
+  })
+  .strict()
+  .refine(
+    (decision) => decision.decision !== 'reject' || decision.reason !== undefined,
+    { path: ['reason'], message: 'A rejection reason is required.' },
+  )
+  .refine(
+    (decision) => decision.decision === 'reject' || decision.reason === undefined,
+    { path: ['reason'], message: 'A reason is only accepted for rejection.' },
+  );
+
 export const negotiationOfferRecordSchema = z
   .object({
     id: z.string().min(1),
@@ -77,12 +93,17 @@ export const negotiationEventSchema = z
       'negotiation.created',
       'offer.submitted',
       'offer.countered',
+      'negotiation.owner_approval_requested',
+      'negotiation.owner_approved',
+      'negotiation.owner_rejected',
       'negotiation.accepted',
       'negotiation.rejected',
       'negotiation.cancelled',
       'negotiation.expired',
     ]),
-    actorAgentId: z.string().min(1),
+    actorType: z.enum(['agent', 'owner']).optional(),
+    actorAgentId: z.string().min(1).optional(),
+    actorOwnerId: z.string().min(1).optional(),
     createdAt: z.string().nullable(),
     offerId: z.string().optional(),
     details: z.record(z.string(), z.unknown()).optional(),
@@ -111,6 +132,10 @@ export const negotiationRecordSchema = z
       .strict()
       .nullable(),
     offerCount: z.number().int().nonnegative(),
+    ownerApprovalRequired: z.boolean().optional(),
+    ownerApprovalRequiredForViewer: z.boolean().optional(),
+    ownerApprovalRecordedForViewer: z.boolean().optional(),
+    acceptanceRequestedByAgentId: z.string().min(1).optional(),
     createdAt: z.string().nullable(),
     updatedAt: z.string().nullable(),
     acceptedAt: z.string().nullable(),

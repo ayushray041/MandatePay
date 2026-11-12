@@ -50,6 +50,8 @@ const mocks = vi.hoisted(() => ({
     },
     offerCount: 1,
     eventCount: 2,
+    ownerApprovals: [] as string[],
+    requiredOwnerApprovalIds: [] as string[],
   },
   otherNegotiationData: null as Record<string, unknown> | null,
   mandates: {
@@ -68,6 +70,7 @@ const mocks = vi.hoisted(() => ({
         requiredDescriptionTerms: [],
       },
       approvalRequirements: { ownerApprovalOperations: [] },
+      ownerId: 'owner-1',
     },
     'mandate-2': {
       authorizedAgentId: 'agent-2',
@@ -84,6 +87,7 @@ const mocks = vi.hoisted(() => ({
         requiredDescriptionTerms: [],
       },
       approvalRequirements: { ownerApprovalOperations: [] },
+      ownerId: 'owner-2',
     },
   } as Record<string, Record<string, unknown>>,
   agentData: {
@@ -101,9 +105,11 @@ vi.mock('@/lib/api/auth', () => ({
 
 import { POST as submitOffer } from '@/app/api/negotiations/[negotiationId]/offers/route';
 import { POST as decideNegotiation } from '@/app/api/negotiations/[negotiationId]/decision/route';
+import { POST as decideOwnerApproval } from '@/app/api/negotiations/[negotiationId]/owner-approval/route';
 
 const context = { params: Promise.resolve({ negotiationId: 'negotiation-1' }) };
 const decisionUrl = 'https://example.test/api/negotiations/negotiation-1/decision';
+const ownerApprovalUrl = 'https://example.test/api/negotiations/negotiation-1/owner-approval';
 const offerUrl = 'https://example.test/api/negotiations/negotiation-1/offers';
 let transaction!: TestTransaction;
 
@@ -153,6 +159,8 @@ describe('negotiation state transitions', () => {
       },
       offerCount: 1,
       eventCount: 2,
+      ownerApprovals: [],
+      requiredOwnerApprovalIds: [],
     };
     mocks.otherNegotiationData = {
       ...mocks.negotiationData,
@@ -181,6 +189,7 @@ describe('negotiation state transitions', () => {
           requiredDescriptionTerms: [],
         },
         approvalRequirements: { ownerApprovalOperations: [] },
+        ownerId: 'owner-1',
       },
       'mandate-2': {
         authorizedAgentId: 'agent-2',
@@ -197,6 +206,7 @@ describe('negotiation state transitions', () => {
           requiredDescriptionTerms: [],
         },
         approvalRequirements: { ownerApprovalOperations: [] },
+        ownerId: 'owner-2',
       },
     };
     mocks.agentData = {
@@ -433,5 +443,216 @@ describe('negotiation state transitions', () => {
       status: 'rejected',
       resolvedByAgentId: 'agent-2',
     });
+  });
+
+  it('defers acceptance and budget reservation when a mandate requires owner approval', async () => {
+    mocks.mandates['mandate-1'].approvalRequirements = {
+      ownerApprovalOperations: ['contract.amend'],
+    };
+
+    const response = await decideNegotiation(
+      request(decisionUrl, { decision: 'accept', mandateId: 'mandate-2' }),
+      context,
+    );
+
+    expect(response.status).toBe(202);
+    expect(mocks.negotiationData).toMatchObject({
+      status: 'pending_owner_approval',
+      requiredOwnerApprovalIds: ['owner-1'],
+      ownerApprovals: [],
+      acceptanceRequestedByAgentId: 'agent-2',
+    });
+    expect(mocks.mandates['mandate-1'].reservedAmountMinor).toBe(0);
+    expect(mocks.mandates['mandate-2'].reservedAmountMinor).toBe(0);
+    expect(mocks.transaction.create).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'negotiations/negotiation-1/events' }),
+      expect.objectContaining({ type: 'negotiation.owner_approval_requested' }),
+    );
+    const conflictingOffer = await submitOffer(
+      request(offerUrl, {
+        mandateId: 'mandate-2',
+        terms: mocks.negotiationData.currentOffer.terms,
+      }),
+      context,
+    );
+    expect(conflictingOffer.status).toBe(409);
+    const conflictingDecision = await decideNegotiation(
+      request(decisionUrl, { decision: 'accept', mandateId: 'mandate-2' }),
+      context,
+    );
+    expect(conflictingDecision.status).toBe(409);
+  });
+
+  it('reserves both mandate budgets only after every required owner approves', async () => {
+    mocks.mandates['mandate-1'].approvalRequirements = {
+      ownerApprovalOperations: ['contract.amend'],
+    };
+    mocks.mandates['mandate-2'].approvalRequirements = {
+      ownerApprovalOperations: ['contract.amend'],
+    };
+    await decideNegotiation(
+      request(decisionUrl, { decision: 'accept', mandateId: 'mandate-2' }),
+      context,
+    );
+
+    mocks.authenticateRequest.mockResolvedValue({
+      authenticated: true,
+      user: { uid: 'owner-1' },
+    });
+    const firstApproval = await decideOwnerApproval(
+      request(ownerApprovalUrl, { decision: 'approve' }),
+      context,
+    );
+    expect(firstApproval.status).toBe(200);
+    expect(mocks.negotiationData.status).toBe('pending_owner_approval');
+    expect(mocks.negotiationData.ownerApprovals).toEqual(['owner-1']);
+    expect(mocks.mandates['mandate-1'].reservedAmountMinor).toBe(0);
+    expect(mocks.mandates['mandate-2'].reservedAmountMinor).toBe(0);
+
+    mocks.authenticateRequest.mockResolvedValue({
+      authenticated: true,
+      user: { uid: 'owner-2' },
+    });
+    const finalApproval = await decideOwnerApproval(
+      request(ownerApprovalUrl, { decision: 'approve' }),
+      context,
+    );
+    expect(finalApproval.status).toBe(200);
+    expect(mocks.negotiationData.status).toBe('accepted');
+    expect(mocks.mandates['mandate-1'].reservedAmountMinor).toBe(12_000);
+    expect(mocks.mandates['mandate-2'].reservedAmountMinor).toBe(12_000);
+    expect(mocks.transaction.create).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'negotiations/negotiation-1/events' }),
+      expect.objectContaining({ type: 'negotiation.accepted', actorOwnerId: 'owner-2' }),
+    );
+  });
+
+  it('denies non-owners and duplicate approvals and rejects without reserving funds', async () => {
+    mocks.mandates['mandate-1'].approvalRequirements = {
+      ownerApprovalOperations: ['contract.amend'],
+    };
+    mocks.mandates['mandate-2'].approvalRequirements = {
+      ownerApprovalOperations: ['contract.amend'],
+    };
+    await decideNegotiation(
+      request(decisionUrl, { decision: 'accept', mandateId: 'mandate-2' }),
+      context,
+    );
+
+    const unauthorized = await decideOwnerApproval(
+      request(ownerApprovalUrl, { decision: 'approve' }),
+      context,
+    );
+    expect(unauthorized.status).toBe(404);
+    expect(mocks.negotiationData.ownerApprovals).toEqual([]);
+
+    mocks.authenticateRequest.mockResolvedValue({
+      authenticated: true,
+      user: { uid: 'owner-1' },
+    });
+    const approval = await decideOwnerApproval(
+      request(ownerApprovalUrl, { decision: 'approve' }),
+      context,
+    );
+    expect(approval.status).toBe(200);
+    const duplicate = await decideOwnerApproval(
+      request(ownerApprovalUrl, { decision: 'approve' }),
+      context,
+    );
+    expect(duplicate.status).toBe(409);
+
+    mocks.authenticateRequest.mockResolvedValue({
+      authenticated: true,
+      user: { uid: 'owner-2' },
+    });
+    const rejection = await decideOwnerApproval(
+      request(ownerApprovalUrl, {
+        decision: 'reject',
+        reason: 'The service scope is not approved.',
+      }),
+      context,
+    );
+    expect(rejection.status).toBe(200);
+    expect(mocks.negotiationData.status).toBe('rejected');
+    expect(mocks.mandates['mandate-1'].reservedAmountMinor).toBe(0);
+    expect(mocks.mandates['mandate-2'].reservedAmountMinor).toBe(0);
+  });
+
+  it('rechecks mandate state and expiry before owner approval', async () => {
+    mocks.mandates['mandate-1'].approvalRequirements = {
+      ownerApprovalOperations: ['contract.amend'],
+    };
+    await decideNegotiation(
+      request(decisionUrl, { decision: 'accept', mandateId: 'mandate-2' }),
+      context,
+    );
+    mocks.authenticateRequest.mockResolvedValue({
+      authenticated: true,
+      user: { uid: 'owner-1' },
+    });
+
+    mocks.mandates['mandate-2'].status = 'revoked';
+    const mandateChanged = await decideOwnerApproval(
+      request(ownerApprovalUrl, { decision: 'approve' }),
+      context,
+    );
+    expect(mandateChanged.status).toBe(409);
+    expect(mocks.mandates['mandate-1'].reservedAmountMinor).toBe(0);
+
+    mocks.mandates['mandate-2'].status = 'active';
+    mocks.negotiationData.expiresAt = new Date(Date.now() - 1_000);
+    const expired = await decideOwnerApproval(
+      request(ownerApprovalUrl, { decision: 'approve' }),
+      context,
+    );
+    expect(expired.status).toBe(410);
+    expect(mocks.negotiationData.status).toBe('expired');
+    expect(mocks.mandates['mandate-1'].reservedAmountMinor).toBe(0);
+  });
+
+  it('serializes concurrent owner approvals and reserves the negotiation only once', async () => {
+    mocks.mandates['mandate-1'].approvalRequirements = {
+      ownerApprovalOperations: ['contract.amend'],
+    };
+    mocks.mandates['mandate-2'].approvalRequirements = {
+      ownerApprovalOperations: ['contract.amend'],
+    };
+    await decideNegotiation(
+      request(decisionUrl, { decision: 'accept', mandateId: 'mandate-2' }),
+      context,
+    );
+
+    let authenticationIndex = 0;
+    mocks.authenticateRequest.mockImplementation(async () => ({
+      authenticated: true,
+      user: { uid: ['owner-1', 'owner-2'][authenticationIndex++] },
+    }));
+    let tail = Promise.resolve();
+    mocks.firestore.runTransaction.mockImplementation(async (
+      callback: (tx: TestTransaction) => Promise<unknown>,
+    ) => {
+      const previous = tail;
+      let release!: () => void;
+      tail = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await previous;
+      try {
+        return await callback(transaction);
+      } finally {
+        release();
+      }
+    });
+
+    const decisions = await Promise.all([
+      decideOwnerApproval(request(ownerApprovalUrl, { decision: 'approve' }), context),
+      decideOwnerApproval(request(ownerApprovalUrl, { decision: 'approve' }), context),
+    ]);
+
+    expect(decisions.map(({ status }) => status)).toEqual([200, 200]);
+    expect(mocks.negotiationData.status).toBe('accepted');
+    expect(mocks.negotiationData.ownerApprovals).toEqual(['owner-1', 'owner-2']);
+    expect(mocks.mandates['mandate-1'].reservedAmountMinor).toBe(12_000);
+    expect(mocks.mandates['mandate-2'].reservedAmountMinor).toBe(12_000);
   });
 });

@@ -19,6 +19,21 @@ export function assertNegotiationParticipant(
   throw new NegotiationError(404, 'NEGOTIATION_NOT_FOUND', 'Negotiation was not found.');
 }
 
+export function assertNegotiationViewer(
+  negotiation: StoredData,
+  uid: string,
+): void {
+  if (
+    negotiation.initiatorAgentId === uid
+    || negotiation.recipientAgentId === uid
+    || (Array.isArray(negotiation.requiredOwnerApprovalIds)
+      && negotiation.requiredOwnerApprovalIds.includes(uid))
+  ) {
+    return;
+  }
+  throw new NegotiationError(404, 'NEGOTIATION_NOT_FOUND', 'Negotiation was not found.');
+}
+
 export function assertMandateActive(
   mandate: StoredData,
   agentId: string,
@@ -87,7 +102,7 @@ export function assertTermsWithinMandate(
   mandate: StoredData,
   terms: NegotiationOfferTerms,
   now: Date,
-): void {
+): boolean {
   if (mandate.currency !== terms.currency) {
     throw new NegotiationError(
       409,
@@ -96,7 +111,7 @@ export function assertTermsWithinMandate(
     );
   }
   try {
-    assertExecutionAllowed(
+    return assertExecutionAllowed(
       mandate,
       'contract.amend',
       terms.amountMinor,
@@ -113,6 +128,26 @@ export function assertTermsWithinMandate(
     }
     throw error;
   }
+}
+
+export function requiredOwnerApprovalIds(
+  mandates: [StoredData, StoredData],
+  terms: NegotiationOfferTerms,
+  now: Date,
+): string[] {
+  const approvalRequired = mandates.map((mandate) => (
+    assertTermsWithinMandate(mandate, terms, now)
+  ));
+  const ownerIds = mandates.flatMap((mandate, index) => {
+    if (!approvalRequired[index]) {
+      return [];
+    }
+    if (typeof mandate.ownerId !== 'string' || !mandate.ownerId) {
+      throw new NegotiationError(500, 'INVALID_MANDATE', 'Mandate owner data is invalid.');
+    }
+    return [mandate.ownerId];
+  });
+  return [...new Set(ownerIds)];
 }
 
 export function isNegotiationTerminal(status: unknown): boolean {

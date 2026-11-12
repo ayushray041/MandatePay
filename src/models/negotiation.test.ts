@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   negotiationCreateSchema,
   negotiationDecisionSchema,
+  negotiationOwnerApprovalSchema,
   negotiationOfferSubmitSchema,
   negotiationOfferTermsSchema,
   negotiationStatuses,
@@ -22,6 +23,7 @@ describe('negotiation schemas', () => {
       'initiated',
       'offer_submitted',
       'counter_offered',
+      'pending_owner_approval',
       'accepted',
       'rejected',
       'expired',
@@ -54,6 +56,15 @@ describe('negotiation schemas', () => {
     expect(negotiationDecisionSchema.safeParse({ decision: 'reject' }).success).toBe(false);
     expect(negotiationDecisionSchema.safeParse({ decision: 'accept', reason: 'No' }).success).toBe(false);
     expect(negotiationDecisionSchema.safeParse({ decision: 'cancel' }).success).toBe(true);
+  });
+
+  it('requires a reason when a mandate owner rejects terms', () => {
+    expect(negotiationOwnerApprovalSchema.safeParse({ decision: 'approve' }).success).toBe(true);
+    expect(negotiationOwnerApprovalSchema.safeParse({ decision: 'reject' }).success).toBe(false);
+    expect(negotiationOwnerApprovalSchema.safeParse({
+      decision: 'reject',
+      reason: 'Outside mandate scope.',
+    }).success).toBe(true);
   });
 
   it('requires a participant mandate for offer submissions', () => {

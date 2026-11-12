@@ -39,16 +39,19 @@ Zod, and performs authorized Firestore operations with the Firebase Admin SDK.
   their own mandate on their first counteroffer or acceptance; it is not disclosed during discovery.
 - Each offer is validated against the submitting agent's active mandate, including currency,
   operation permission, amount, remaining budget, and configured execution conditions.
-- Acceptance rechecks the latest offer against both mandates inside a Firestore transaction. The
-  same transaction reserves the accepted amount against both mandate budgets, preventing concurrent
-  acceptances from exceeding available limits.
+- Agent acceptance rechecks the latest offer against both mandates inside a Firestore transaction.
+  If either mandate requires owner approval, acceptance remains pending and reserves no budget until
+  each required owner approves. The final owner approval rechecks authorization, mandate state,
+  terms, approval requirements, and capacity, then accepts and reserves both budgets atomically.
+  Negotiations without an owner-approval requirement reserve budget in the agent acceptance
+  transaction.
 - Offer records and lifecycle events are stored in negotiation subcollections and are never edited.
   Firestore rules deny direct client access; participant authorization is enforced by the API.
 - Negotiation expiry is recorded on the first attempted mutation after expiry; no scheduled expiry
   worker is implemented.
-- Acceptance records agreement and a budget reservation only. It does not execute a service,
-  contract, payment, or external operation. A later execution integration must consume or release
-  that reservation under an explicit policy.
+- Acceptance records agreement and a budget reservation only after any required owner approvals. It
+  does not execute a service, contract, payment, or external operation. A later execution integration
+  must consume or release that reservation under an explicit policy.
 - Contract generation does not reserve the accepted amount again. Rejection releases the
   negotiation reservation transactionally. Approved amendments apply only the amount delta to both
   mandates in the same transaction as the new immutable version.

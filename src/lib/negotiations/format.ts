@@ -33,6 +33,34 @@ export function formatNegotiation(
   };
 }
 
+export function formatNegotiationForViewer(
+  id: string,
+  data: Record<string, unknown>,
+  viewerId: string,
+  now = new Date(),
+) {
+  const requiredOwnerApprovalIds = Array.isArray(data.requiredOwnerApprovalIds)
+    ? data.requiredOwnerApprovalIds.filter((ownerId): ownerId is string => typeof ownerId === 'string')
+    : [];
+  const ownerApprovals = Array.isArray(data.ownerApprovals)
+    ? data.ownerApprovals.filter((ownerId): ownerId is string => typeof ownerId === 'string')
+    : [];
+  const publicData = { ...data };
+  delete publicData.requiredOwnerApprovalIds;
+  delete publicData.ownerApprovals;
+  const publicNegotiation = formatNegotiation(id, publicData, now);
+  return {
+    ...publicNegotiation,
+    ownerApprovalRequired: requiredOwnerApprovalIds.length > 0,
+    ...(requiredOwnerApprovalIds.includes(viewerId)
+      ? {
+          ownerApprovalRequiredForViewer: true,
+          ownerApprovalRecordedForViewer: ownerApprovals.includes(viewerId),
+        }
+      : {}),
+  };
+}
+
 export function formatNegotiationOffer(id: string, data: Record<string, unknown>) {
   return {
     ...data,
@@ -41,10 +69,14 @@ export function formatNegotiationOffer(id: string, data: Record<string, unknown>
   };
 }
 
-export function formatNegotiationEvent(id: string, data: Record<string, unknown>) {
+export function formatNegotiationEvent(
+  id: string,
+  data: Record<string, unknown>,
+): Record<string, unknown> & { id: string; createdAt: string | null } {
   return {
     ...data,
     id,
+    actorType: typeof data.actorOwnerId === 'string' ? 'owner' : 'agent',
     createdAt: timestampToIso(data.createdAt),
   };
 }

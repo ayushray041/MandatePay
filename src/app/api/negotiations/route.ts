@@ -4,7 +4,7 @@ import { apiError, apiSuccess } from '@/lib/api/responses';
 import { getServerTimestamp } from '@/lib/firebase/firestore';
 import { NegotiationError, negotiationErrorResponse } from '@/lib/negotiations/errors';
 import { writeNegotiationEvent } from '@/lib/negotiations/events';
-import { formatNegotiation } from '@/lib/negotiations/format';
+import { formatNegotiation, formatNegotiationForViewer } from '@/lib/negotiations/format';
 import { assertMandateActive } from '@/lib/negotiations/policy';
 import { negotiationCreateSchema } from '@/models/negotiation';
 
@@ -21,7 +21,7 @@ export async function GET(request: Request) {
 
   const uid = authentication.user.uid;
   try {
-    const [initiated, received] = await Promise.all([
+    const [initiated, received, ownerApprovals] = await Promise.all([
       adminFirestore.collection('negotiations')
         .where('initiatorAgentId', '==', uid)
         .orderBy('updatedAt', 'desc')
@@ -32,11 +32,15 @@ export async function GET(request: Request) {
         .orderBy('updatedAt', 'desc')
         .limit(50)
         .get(),
+      adminFirestore.collection('negotiations')
+        .where('requiredOwnerApprovalIds', 'array-contains', uid)
+        .limit(50)
+        .get(),
     ]);
     const negotiations = new Map(
-      [...initiated.docs, ...received.docs].map((snapshot) => [
+      [...initiated.docs, ...received.docs, ...ownerApprovals.docs].map((snapshot) => [
         snapshot.id,
-        formatNegotiation(snapshot.id, snapshot.data()),
+        formatNegotiationForViewer(snapshot.id, snapshot.data(), uid),
       ]),
     );
     return apiSuccess([...negotiations.values()].sort((left, right) => (

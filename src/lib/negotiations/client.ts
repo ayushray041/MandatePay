@@ -89,6 +89,18 @@ export async function decideNegotiation(
   );
 }
 
+export async function decideNegotiationOwnerApproval(
+  negotiationId: string,
+  input: { decision: 'approve' | 'reject'; reason?: string },
+): Promise<NegotiationRecord> {
+  return authenticatedApiRequest(
+    `/api/negotiations/${encodeURIComponent(negotiationId)}/owner-approval`,
+    negotiationRecordSchema,
+    { method: 'POST', body: JSON.stringify(input) },
+    'Owner approval failed.',
+  );
+}
+
 export function requestNegotiationIntelligence(
   negotiationId: string,
   input:

@@ -54,7 +54,8 @@
 - Added server-owned agent registration, profile updates, and category-filtered discovery. Agent IDs and display names come from verified Firebase identity and the user profile; discovery omits email and mandate data.
 - Added private bilateral negotiation requests with offer submission, counteroffers, acceptance, rejection, cancellation, expiry, participant inbox/detail APIs, and an append-only offer and activity history.
 - Enforced state transitions and participant access in server routes. Offer and acceptance checks validate active mandates, currencies, allowed operations, spending limits, execution conditions, and remaining budget.
-- Made acceptance transactional and concurrency-safe: both active mandates are rechecked and the agreed amount is reserved against each mandate budget in the same transaction. A reservation records agreement only; it does not execute services, contracts, payments, or authorizations.
+- Made acceptance transactional and concurrency-safe. When either mandate requires owner approval, the request remains pending without reserving funds; every required owner must approve before the server rechecks both mandates and reserves the agreed amount atomically. Negotiations without this requirement reserve during agent acceptance. A reservation records agreement only; it does not execute services, contracts, payments, or authorizations.
+- Added authenticated owner approval and rejection, owner-only pending negotiation inbox/detail access, append-only owner decision events, and expiry/state checks. Owner identities are only disclosed to specifically required owners; agents receive the pending status without owner UIDs.
 - Added authenticated agent registration, agent discovery, negotiation inbox, request form, detail view, offer comparison, counteroffer and decision actions, timeline, status, expiry, and loading/error/empty states.
 - Updated Firestore rules to deny direct client access to agent and negotiation data, and documented the API and data model.
 
@@ -71,6 +72,13 @@
 - Accepted budget reservations remain reserved until a later explicit execution/settlement integration consumes or releases them. No release mechanism is implied or fabricated.
 - AI-assisted negotiation is implemented in Phase 6. Contract processing and amendments are implemented in Phase 4; payment execution and webhooks are implemented in Phase 5.
 - No live Firebase credentials or external service operations are used for local verification. Deploy the current Firestore rules and indexes to the authorized Firebase project before rollout.
+
+### Owner-approval follow-up verification
+- Focused owner-approval, authorization, privacy, expiry, concurrency, and schema tests passed: 29 tests.
+- `npx tsc --noEmit`: passed.
+- `npm run lint`: passed.
+- `npm run build`: passed; the owner-approval API route was generated.
+- `npm test`: passed — 26 files passed, 1 skipped; 118 tests passed, 3 skipped.
 
 ## Phase 4: Contract generation and amendments
 

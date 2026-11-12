@@ -67,21 +67,27 @@ discovery. Each participant's mandate is checked server-side when submitting or 
 | Method | Path | Request | Response / notes |
 |--------|------|---------|------------------|
 | POST | `/api/negotiations` | `{ mandateId, recipientAgentId, title, expiresAt }` | `{ data: NegotiationRecord }`; creates an `initiated` request. Expiry must be in the future and within 30 days. |
-| GET | `/api/negotiations` | – | `{ data: NegotiationRecord[] }`; lists up to 50 negotiations involving the caller. |
-| GET | `/api/negotiations/:negotiationId` | – | `{ data: { negotiation, offers, events } }`; complete participant-only history. |
+| GET | `/api/negotiations` | – | `{ data: NegotiationRecord[] }`; lists up to 50 negotiations involving the caller, including owner approvals assigned to the caller. |
+| GET | `/api/negotiations/:negotiationId` | – | `{ data: { negotiation, offers, events } }`; complete history for agent participants and specifically required mandate owners. |
 | POST | `/api/negotiations/:negotiationId/offers` | `{ mandateId?, terms }` | `{ data: NegotiationOffer }`; initiator submits the first offer and the other participant counters. Recipient selects a mandate on their first response. |
-| POST | `/api/negotiations/:negotiationId/decision` | `{ decision: "accept" \| "reject" \| "cancel", mandateId?, reason? }` | `{ data: NegotiationRecord }`; rejection requires a reason and only the initiator can cancel. |
+| POST | `/api/negotiations/:negotiationId/decision` | `{ decision: "accept" \| "reject" \| "cancel", mandateId?, reason? }` | `{ data: NegotiationRecord }`; acceptance returns `202` with `pending_owner_approval` when any mandate requires owner approval. Rejection requires a reason and only the initiator can cancel. |
+| POST | `/api/negotiations/:negotiationId/owner-approval` | `{ decision: "approve" \| "reject", reason? }` | Authenticated required-owner decision. Rejection requires a reason. The final approval revalidates both mandates and atomically reserves their budgets; earlier approvals reserve nothing. |
 
 Offer `terms` contain `title`, `category`, `description`, integer `amountMinor`, `currency`, and
 `deliveryDays`. The lifecycle states are `initiated`, `offer_submitted`, `counter_offered`,
-`accepted`, `rejected`, `expired`, and `cancelled`. Offer submission and decisions validate state
-transitions transactionally. Each offer and transition appends a record under the negotiation's
-`offers` or `events` subcollection. Expiry is marked and recorded on the first attempted mutation
-after the deadline; there is no scheduled expiry worker.
+`pending_owner_approval`, `accepted`, `rejected`, `expired`, and `cancelled`. Offer submission,
+agent decisions, and owner approvals validate state transitions transactionally. Each offer and
+transition appends a record under the negotiation's `offers` or `events` subcollection. Owners
+without agent profiles can review only negotiations that explicitly require their approval. Expiry
+is marked and recorded on the first attempted mutation after the deadline; there is no scheduled
+expiry worker.
 
-Acceptance revalidates the latest offer against both active mandates, then reserves the agreed
-amount against both budgets in the same Firestore transaction. Acceptance records agreement and
-reserves budget only; it does not execute a service, contract, payment, or operation authorization.
+Acceptance revalidates the latest offer against both active mandates. If no owner approval is
+required, it reserves the agreed amount against both budgets in the same Firestore transaction. If
+approval is required, the negotiation remains pending without a reservation until every required
+owner approves. The final owner approval rechecks mandate status, terms, approval requirements, and
+budget capacity before atomically accepting and reserving. Acceptance records agreement and reserves
+budget only; it does not execute a service, contract, payment, or operation authorization.
 
 #### Negotiation intelligence
 

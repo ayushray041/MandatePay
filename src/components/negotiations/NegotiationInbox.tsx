@@ -19,6 +19,7 @@ const statusStyles: Record<NegotiationStatus, string> = {
   initiated: 'border-blue-700 bg-blue-50 text-blue-800',
   offer_submitted: 'border-amber-700 bg-amber-50 text-amber-900',
   counter_offered: 'border-violet-700 bg-violet-50 text-violet-800',
+  pending_owner_approval: 'border-orange-700 bg-orange-50 text-orange-900',
   accepted: 'border-emerald-700 bg-emerald-50 text-emerald-800',
   rejected: 'border-red-700 bg-red-50 text-red-800',
   expired: 'border-mp-warm-grey bg-mp-app-bg text-mp-medium-grey',
@@ -101,6 +102,10 @@ export function NegotiationInbox() {
     mandate.authorizedAgentId === user?.uid
     && mandate.status === 'active'
   ));
+  const hasOwnerApprovalTasks = negotiations.some((negotiation) => (
+    negotiation.status === 'pending_owner_approval'
+    && negotiation.ownerApprovalRequiredForViewer
+  ));
 
   const refresh = () => {
     setLoading(true);
@@ -163,7 +168,14 @@ export function NegotiationInbox() {
       ) : (
         <>
           {!agentProfile ? (
-            <AgentRegistrationForm onRegistered={(profile) => setAgentProfile(profile)} />
+            <div className="space-y-5">
+              {hasOwnerApprovalTasks && (
+                <p className="border-l-2 border-mp-orange bg-mp-surface px-4 py-3 text-sm">
+                  You can review the owner-approval requests below without registering as an agent.
+                </p>
+              )}
+              <AgentRegistrationForm onRegistered={(profile) => setAgentProfile(profile)} />
+            </div>
           ) : (
             <section className="grid gap-8 xl:grid-cols-[minmax(0,1.35fr)_minmax(19rem,0.65fr)]">
               <div className="space-y-5">
@@ -298,6 +310,9 @@ export function NegotiationInbox() {
                     ? negotiation.recipientAgentId
                     : negotiation.initiatorAgentId;
                   const counterpart = agents.find((agent) => agent.uid === counterpartId);
+                  const needsOwnerReview = negotiation.status === 'pending_owner_approval'
+                    && negotiation.ownerApprovalRequiredForViewer
+                    && !negotiation.ownerApprovalRecordedForViewer;
                   return (
                     <article key={negotiation.id} className="flex flex-wrap items-center justify-between gap-4 border border-mp-warm-grey bg-mp-surface p-4 sm:p-5">
                       <div>
@@ -311,6 +326,11 @@ export function NegotiationInbox() {
                           With {counterpart?.displayName ?? `agent ${counterpartId}`}
                           {' · '}Expires {new Date(negotiation.expiresAt).toLocaleString()}
                         </p>
+                        {needsOwnerReview && (
+                          <p className="mt-1 text-sm font-semibold text-orange-900">
+                            Your approval is needed before either mandate reserves budget.
+                          </p>
+                        )}
                         {negotiation.currentOffer && (
                           <p className="mt-1 text-sm text-mp-medium-grey">
                             Latest offer: {formatMinorAmount(

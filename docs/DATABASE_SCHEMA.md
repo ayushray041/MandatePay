@@ -11,9 +11,9 @@ are accessed through authenticated server APIs only.
 | `mandates` | Auto ID | `ownerId`, `authorizedAgentId`, title and description, `spendingLimitMinor`, `spentAmountMinor`, `reservedAmountMinor`, currency, date window, allowed operations, approval requirements, execution conditions, lifecycle status, optional pending limit request, timestamps | Server-enforced spending authority. Only the owner and assigned agent can access it through APIs. |
 | `mandateAuthorizations` | Auto ID | `mandateId`, `ownerId`, `authorizedAgentId`, operation, amount, currency, description, status, timestamps | Operation authorization requests and owner decisions. Direct client access is denied. |
 | `auditLogs` | Auto ID | `entity`, `entityId`, `action`, `performedBy`, `payload`, `timestamp` | Immutable server-side mandate audit events. |
-| `negotiations` | Auto ID | `initiatorAgentId`, `recipientAgentId`, `initiatorMandateId`, nullable `recipientMandateId`, title, lifecycle status, expiry, current offer snapshot and ID, `offerCount`, `eventCount`, resolution fields, timestamps | Private bilateral negotiation state. The recipient mandate is bound on the recipient's first counteroffer or acceptance. |
+| `negotiations` | Auto ID | `initiatorAgentId`, `recipientAgentId`, `initiatorMandateId`, nullable `recipientMandateId`, title, lifecycle status, expiry, current offer snapshot and ID, `requiredOwnerApprovalIds`, `ownerApprovals`, optional acceptance requester, `offerCount`, `eventCount`, resolution fields, timestamps | Private bilateral negotiation state. The recipient mandate is bound on the recipient's first counteroffer or acceptance. |
 | `negotiations/{id}/offers` | Auto ID | `negotiationId`, sequence, `submittedByAgentId`, `mandateId`, terms, `createdAt` | Append-only offer and counteroffer history. Terms contain title, category, description, amount in integer minor units, currency, and delivery days. |
-| `negotiations/{id}/events` | Auto ID | sequence, event type, `actorAgentId`, optional offer ID and details, `createdAt` | Append-only negotiation lifecycle and activity history. |
+| `negotiations/{id}/events` | Auto ID | sequence, event type, exactly one agent or owner actor ID, optional offer ID and details, `createdAt` | Append-only negotiation lifecycle and activity history. |
 | `contracts` | Accepted negotiation ID | `negotiationId`, participant and approver UIDs, mandate IDs, lifecycle status, current version pointer, approvals, active amendment ID, expiry, event count, timestamps | One server-generated contract per accepted negotiation; all participant access is through authorized APIs. |
 | `contracts/{id}/versions` | `v1`, `v2`, ... | `contractId`, version, previous version ID, negotiation ID, optional amendment ID, creator, creation time, complete terms snapshot | Immutable contract documents. Approved amendments create a new version instead of modifying prior terms. |
 | `contracts/{id}/amendments` | Auto ID | base version, complete proposed terms, review status, required approvers, approvals, creator, rejection reason, timestamps | Amendment proposals and party decisions. |
@@ -22,10 +22,12 @@ are accessed through authenticated server APIs only.
 | `payments/{contractId}/events` | Auto ID | sequence, lifecycle event, source, actor, optional provider event ID and details, `createdAt` | Append-only payment and provider activity history. |
 | `paypalWebhookEvents` | SHA-256 of provider event ID | original provider event ID, event type, processing outcome, payment ID, receive timestamp | Durable webhook idempotency receipts; does not store raw event bodies or signature headers. |
 
-Negotiation lifecycle states are `initiated`, `offer_submitted`, `counter_offered`, `accepted`,
-`rejected`, `expired`, and `cancelled`. Accepted amounts are added transactionally to
-`reservedAmountMinor` on both participant mandates. Reserved amounts reduce available mandate
-capacity and are not an execution or payment record.
+Negotiation lifecycle states are `initiated`, `offer_submitted`, `counter_offered`,
+`pending_owner_approval`, `accepted`, `rejected`, `expired`, and `cancelled`. When either mandate
+requires owner approval, the negotiation records each required owner and their decisions; no budget
+is reserved until all required owners approve. Final approval revalidates both active mandates and
+reserves the amount transactionally on both participant mandates. Reserved amounts reduce available
+mandate capacity and are not an execution or payment record.
 
 Negotiation intelligence and contract analysis are stateless: requests use existing participant and
 contract-version records, and prompts/model responses are not persisted in Firestore.

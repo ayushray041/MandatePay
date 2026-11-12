@@ -68,7 +68,7 @@ vi.mock('@/lib/api/auth', () => ({
   authenticateRequest: mocks.authenticateRequest,
 }));
 
-import { POST as createNegotiation } from '@/app/api/negotiations/route';
+import { GET as listNegotiations, POST as createNegotiation } from '@/app/api/negotiations/route';
 import { POST as submitOffer } from '@/app/api/negotiations/[negotiationId]/offers/route';
 
 const negotiationContext = {
@@ -248,5 +248,49 @@ describe('negotiation offer APIs', () => {
     );
     expect(response.status).toBe(404);
     expect(mocks.transaction.create).not.toHaveBeenCalled();
+  });
+
+  it('includes only the caller’s owner-approval negotiations in the inbox', async () => {
+    const pendingNegotiation = {
+      ...mocks.negotiationData,
+      status: 'pending_owner_approval',
+      requiredOwnerApprovalIds: ['owner-1'],
+      ownerApprovals: [],
+    };
+    mocks.authenticateRequest.mockResolvedValue({
+      authenticated: true,
+      user: { uid: 'owner-1' },
+    });
+    mocks.firestore.collection.mockImplementation((name: string) => ({
+      doc: (id?: string) => reference(name, id),
+      where: (field: string, _operator: string, value: string) => ({
+        orderBy: () => ({
+          limit: () => ({ get: async () => ({ docs: [] }) }),
+        }),
+        limit: () => ({
+          get: async () => ({
+            docs: field === 'requiredOwnerApprovalIds' && value === 'owner-1'
+              ? [{
+                  id: 'negotiation-pending',
+                  data: () => pendingNegotiation,
+                }]
+              : [],
+          }),
+        }),
+      }),
+    }));
+
+    const response = await listNegotiations(
+      new Request('https://example.test/api/negotiations'),
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      data: [{
+        id: 'negotiation-pending',
+        status: 'pending_owner_approval',
+        ownerApprovalRequiredForViewer: true,
+      }],
+    });
   });
 });

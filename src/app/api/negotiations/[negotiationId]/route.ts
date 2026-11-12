@@ -2,11 +2,11 @@ import { adminFirestore } from '@/lib/firebase/admin';
 import { authenticateRequest } from '@/lib/api/auth';
 import { apiError, apiSuccess } from '@/lib/api/responses';
 import {
-  formatNegotiation,
   formatNegotiationEvent,
+  formatNegotiationForViewer,
   formatNegotiationOffer,
 } from '@/lib/negotiations/format';
-import { assertNegotiationParticipant } from '@/lib/negotiations/policy';
+import { assertNegotiationViewer } from '@/lib/negotiations/policy';
 import { negotiationErrorResponse } from '@/lib/negotiations/errors';
 
 type RouteContext = { params: Promise<{ negotiationId: string }> };
@@ -32,7 +32,7 @@ export async function GET(request: Request, context: RouteContext) {
     if (!negotiation) {
       throw new Error('Negotiation document has no data.');
     }
-    assertNegotiationParticipant(negotiation, authentication.user.uid);
+    assertNegotiationViewer(negotiation, authentication.user.uid);
 
     const [offers, events, initiator, recipient] = await Promise.all([
       negotiationRef.collection('offers').orderBy('sequence', 'asc').get(),
@@ -42,12 +42,20 @@ export async function GET(request: Request, context: RouteContext) {
     ]);
     return apiSuccess({
       negotiation: {
-        ...formatNegotiation(snapshot.id, negotiation),
+        ...formatNegotiationForViewer(snapshot.id, negotiation, authentication.user.uid),
         initiatorDisplayName: initiator.data()?.displayName ?? 'Agent',
         recipientDisplayName: recipient.data()?.displayName ?? 'Agent',
       },
       offers: offers.docs.map((offer) => formatNegotiationOffer(offer.id, offer.data())),
-      events: events.docs.map((event) => formatNegotiationEvent(event.id, event.data())),
+      events: events.docs.map((event) => {
+        const formatted = formatNegotiationEvent(event.id, event.data());
+        if (formatted.actorOwnerId === authentication.user.uid) {
+          return formatted;
+        }
+        const publicEvent = { ...formatted };
+        delete publicEvent.actorOwnerId;
+        return publicEvent;
+      }),
     });
   } catch (error: unknown) {
     return negotiationErrorResponse(error);

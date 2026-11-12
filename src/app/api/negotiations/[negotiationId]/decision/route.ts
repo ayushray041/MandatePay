@@ -4,14 +4,14 @@ import { apiError, apiSuccess } from '@/lib/api/responses';
 import { getServerTimestamp } from '@/lib/firebase/firestore';
 import { NegotiationError, negotiationErrorResponse } from '@/lib/negotiations/errors';
 import { writeNegotiationEvent } from '@/lib/negotiations/events';
-import { formatNegotiation } from '@/lib/negotiations/format';
+import { formatNegotiationForViewer } from '@/lib/negotiations/format';
 import {
   assertMandateActive,
   assertNegotiationParticipant,
   assertOfferWithinMandate,
-  assertTermsWithinMandate,
   isNegotiationExpired,
   isNegotiationTerminal,
+  requiredOwnerApprovalIds,
 } from '@/lib/negotiations/policy';
 import {
   negotiationDecisionSchema,
@@ -61,7 +61,15 @@ export async function POST(request: Request, context: RouteContext) {
         throw new NegotiationError(409, 'NEGOTIATION_CLOSED', 'Negotiation is already closed.');
       }
       if (isNegotiationExpired(negotiation, now)) {
-        const eventCount = Number(negotiation.eventCount ?? 0) + 1;
+        const currentEventCount = Number(negotiation.eventCount ?? 0);
+        if (
+          !Number.isSafeInteger(currentEventCount)
+          || currentEventCount < 0
+          || currentEventCount >= Number.MAX_SAFE_INTEGER
+        ) {
+          throw new NegotiationError(500, 'INVALID_NEGOTIATION', 'Negotiation event sequence is invalid.');
+        }
+        const eventCount = currentEventCount + 1;
         transaction.update(negotiationRef, {
           status: 'expired',
           eventCount,
@@ -143,6 +151,7 @@ export async function POST(request: Request, context: RouteContext) {
         });
         return {
           expired: false as const,
+          pendingOwnerApproval: false as const,
           negotiation: {
             ...negotiation,
             status: nextStatus,
@@ -236,13 +245,59 @@ export async function POST(request: Request, context: RouteContext) {
 
       const offerAuthorId = String(currentOffer.submittedByAgentId);
       if (offerAuthorId === initiatorId) {
+        if (currentOffer.mandateId !== initiatorMandateId) {
+          throw new NegotiationError(500, 'INVALID_OFFER', 'Offer mandate does not match the initiator mandate.');
+        }
         assertOfferWithinMandate(initiatorMandate, initiatorAgent, initiatorId, terms, now);
-        assertTermsWithinMandate(recipientMandate, terms, now);
       } else if (offerAuthorId === recipientId) {
+        if (currentOffer.mandateId !== recipientMandateId) {
+          throw new NegotiationError(500, 'INVALID_OFFER', 'Offer mandate does not match the recipient mandate.');
+        }
         assertOfferWithinMandate(recipientMandate, recipientAgent, recipientId, terms, now);
-        assertTermsWithinMandate(initiatorMandate, terms, now);
       } else {
         throw new NegotiationError(500, 'INVALID_OFFER', 'Offer author is not a negotiation participant.');
+      }
+      const requiredOwners = requiredOwnerApprovalIds(
+        [initiatorMandate, recipientMandate],
+        terms,
+        now,
+      );
+
+      if (requiredOwners.length > 0) {
+        transaction.update(negotiationRef, {
+          ...(participant === 'recipient' && !boundRecipientMandateId
+            ? { recipientMandateId }
+            : {}),
+          status: 'pending_owner_approval',
+          requiredOwnerApprovalIds: requiredOwners,
+          ownerApprovals: [],
+          acceptanceRequestedByAgentId: uid,
+          eventCount,
+          updatedAt: timestamp,
+        });
+        writeNegotiationEvent(transaction, negotiationRef, {
+          sequence: eventCount,
+          type: 'negotiation.owner_approval_requested',
+          actorAgentId: uid,
+          offerId: String(negotiation.currentOfferId),
+          details: { requiredApprovalCount: requiredOwners.length },
+        });
+        return {
+          expired: false as const,
+          pendingOwnerApproval: true as const,
+          negotiation: {
+            ...negotiation,
+            ...(participant === 'recipient' && !boundRecipientMandateId
+              ? { recipientMandateId }
+              : {}),
+            status: 'pending_owner_approval',
+            requiredOwnerApprovalIds: requiredOwners,
+            ownerApprovals: [],
+            acceptanceRequestedByAgentId: uid,
+            eventCount,
+            updatedAt: now,
+          },
+        };
       }
 
       const initiatorReserved = Number(initiatorMandate.reservedAmountMinor ?? 0);
@@ -281,6 +336,7 @@ export async function POST(request: Request, context: RouteContext) {
 
       return {
         expired: false as const,
+        pendingOwnerApproval: false as const,
         negotiation: {
           ...negotiation,
           ...(participant === 'recipient' && !boundRecipientMandateId
@@ -298,7 +354,10 @@ export async function POST(request: Request, context: RouteContext) {
     if (result.expired) {
       return apiError(410, 'NEGOTIATION_EXPIRED', 'Negotiation has expired.');
     }
-    return apiSuccess(formatNegotiation(negotiationId, result.negotiation));
+    return apiSuccess(
+      formatNegotiationForViewer(negotiationId, result.negotiation, uid),
+      result.pendingOwnerApproval ? 202 : 200,
+    );
   } catch (error: unknown) {
     return negotiationErrorResponse(error);
   }

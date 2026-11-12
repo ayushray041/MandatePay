@@ -11,6 +11,7 @@ import { formatMinorAmount, parseMajorAmount } from '@/lib/mandates/money';
 import { agentCategorySchema } from '@/models/agent';
 import {
   decideNegotiation,
+  decideNegotiationOwnerApproval,
   getNegotiation,
   requestNegotiationIntelligence,
   submitNegotiationOffer,
@@ -25,6 +26,7 @@ const statusStyles: Record<NegotiationStatus, string> = {
   initiated: 'border-blue-700 bg-blue-50 text-blue-800',
   offer_submitted: 'border-amber-700 bg-amber-50 text-amber-900',
   counter_offered: 'border-violet-700 bg-violet-50 text-violet-800',
+  pending_owner_approval: 'border-orange-700 bg-orange-50 text-orange-900',
   accepted: 'border-emerald-700 bg-emerald-50 text-emerald-800',
   rejected: 'border-red-700 bg-red-50 text-red-800',
   expired: 'border-mp-warm-grey bg-mp-app-bg text-mp-medium-grey',
@@ -35,6 +37,9 @@ const eventLabels: Record<string, string> = {
   'negotiation.created': 'Negotiation requested',
   'offer.submitted': 'Initial offer submitted',
   'offer.countered': 'Counteroffer submitted',
+  'negotiation.owner_approval_requested': 'Owner approval requested',
+  'negotiation.owner_approved': 'Mandate owner approved',
+  'negotiation.owner_rejected': 'Mandate owner rejected',
   'negotiation.accepted': 'Terms accepted',
   'negotiation.rejected': 'Negotiation rejected',
   'negotiation.cancelled': 'Negotiation cancelled',
@@ -68,9 +73,6 @@ export function NegotiationDetail({ negotiationId }: Props) {
         listMandates(),
         getMyAgentProfile(),
       ]);
-      if (!nextAgent) {
-        throw new Error('Register as an agent before participating in negotiations.');
-      }
       setDetail(nextDetail);
       setMandates(nextMandates);
       setAgent(nextAgent);
@@ -94,9 +96,6 @@ export function NegotiationDetail({ negotiationId }: Props) {
       .then(([nextDetail, nextMandates, nextAgent]) => {
         if (!active) {
           return;
-        }
-        if (!nextAgent) {
-          throw new Error('Register as an agent before participating in negotiations.');
         }
         setDetail(nextDetail);
         setMandates(nextMandates);
@@ -154,13 +153,16 @@ export function NegotiationDetail({ negotiationId }: Props) {
     ? detail.offers[detail.offers.length - 2]
     : null;
 
-  const runAction = async (action: () => Promise<unknown>, message: string) => {
+  const runAction = async <T,>(
+    action: () => Promise<T>,
+    message: string | ((result: T) => string),
+  ) => {
     setBusy(true);
     setError(null);
     setNotice(null);
     try {
-      await action();
-      setNotice(message);
+      const result = await action();
+      setNotice(typeof message === 'function' ? message(result) : message);
       await load(false);
       return true;
     } catch (caughtError: unknown) {
@@ -225,12 +227,44 @@ export function NegotiationDetail({ negotiationId }: Props) {
         ...(decision === 'accept' && ownMandate ? { mandateId: ownMandate.id } : {}),
         ...(reason ? { reason } : {}),
       }),
-      decision === 'accept'
-        ? 'Terms accepted and reserved against both mandates.'
+      (result) => decision === 'accept'
+        ? result.status === 'pending_owner_approval'
+          ? 'Acceptance requested. Required mandate owners must approve before either budget is reserved.'
+          : 'Terms accepted and reserved against both mandates.'
         : decision === 'reject'
           ? 'Negotiation rejected.'
           : 'Negotiation cancelled.',
     );
+  };
+
+  const reviewOwnerApproval = async (
+    decision: 'approve' | 'reject',
+    reason?: string,
+  ) => {
+    if (!negotiation) {
+      return;
+    }
+    await runAction(
+      () => decideNegotiationOwnerApproval(negotiation.id, {
+        decision,
+        ...(reason ? { reason } : {}),
+      }),
+      (result) => result.status === 'accepted'
+        ? 'All required owners approved. The negotiated amount is now reserved against both mandates.'
+        : decision === 'approve'
+          ? 'Approval recorded. The negotiation remains pending until every required owner approves; no budget is reserved yet.'
+          : 'Negotiation rejected by a mandate owner. No budget was reserved.',
+    );
+  };
+
+  const rejectAsOwner = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const reason = String(new FormData(event.currentTarget).get('reason') ?? '').trim();
+    if (!reason) {
+      setError('Provide a reason before rejecting.');
+      return;
+    }
+    await reviewOwnerApproval('reject', reason);
   };
 
   const reject = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -286,6 +320,20 @@ export function NegotiationDetail({ negotiationId }: Props) {
     && !negotiation.recipientMandateId
     && !terminal;
   const ownCapabilities = agent?.capabilities ?? [];
+  const isRequiredOwner = Boolean(
+    user
+    && negotiation.status === 'pending_owner_approval'
+    && negotiation.ownerApprovalRequiredForViewer,
+  );
+  const hasApprovedAsOwner = Boolean(
+    user && negotiation.ownerApprovalRecordedForViewer,
+  );
+  const ownerMandatesForReview = isRequiredOwner
+    ? mandates.filter((mandate) => (
+        mandate.ownerId === user?.uid
+        && [negotiation.initiatorMandateId, negotiation.recipientMandateId].includes(mandate.id)
+      ))
+    : [];
 
   return (
     <section className="mp-page mx-auto w-full max-w-6xl space-y-8">
@@ -322,6 +370,17 @@ export function NegotiationDetail({ negotiationId }: Props) {
         <p className="border border-emerald-700 bg-emerald-50 p-4 text-sm text-emerald-900">
           Accepted terms are reserved against both mandates. This records agreement only; it does not
           execute a service, contract, or payment.
+        </p>
+      )}
+      {negotiation.status === 'pending_owner_approval' && (
+        <p className="border border-orange-700 bg-orange-50 p-4 text-sm text-orange-950">
+          Acceptance is pending explicit approval from every required mandate owner. No budget is
+          reserved until all required owners approve.
+        </p>
+      )}
+      {isRequiredOwner && hasApprovedAsOwner && (
+        <p className="border border-emerald-700 bg-emerald-50 p-4 text-sm text-emerald-900">
+          Your approval is recorded. The negotiation is waiting for the remaining required owner approvals.
         </p>
       )}
       {negotiation.status === 'rejected' && negotiation.rejectionReason && (
@@ -379,6 +438,7 @@ export function NegotiationDetail({ negotiationId }: Props) {
         </div>
       )}
 
+      {participantRole && (
       <section className="space-y-4 border border-mp-warm-grey bg-mp-surface p-5 sm:p-7" aria-labelledby="ai-intelligence-heading">
         <div className="flex items-center gap-2">
           <Sparkles size={18} className="text-mp-orange" aria-hidden="true" />
@@ -524,6 +584,69 @@ export function NegotiationDetail({ negotiationId }: Props) {
           </div>
         )}
       </section>
+      )}
+
+      {isRequiredOwner && !hasApprovedAsOwner && (
+        <section className="space-y-4 border border-orange-700 bg-orange-50 p-5 sm:p-7">
+          <div>
+            <p className="mp-kicker">Mandate owner review</p>
+            <h2 className="mt-1 text-lg font-semibold">Approve negotiated terms?</h2>
+            <p className="mt-2 text-sm">
+              Review the offer and your mandate information below. Approval only records the owner
+              decision; the server will revalidate both mandates and reserve budget only after every
+              required owner approves.
+            </p>
+          </div>
+          <div className="border-t border-orange-200 pt-4">
+            <h3 className="font-semibold">Your mandate capacity</h3>
+            {ownerMandatesForReview.length === 0 ? (
+              <p className="mt-2 text-sm" role="alert">
+                Your mandate details are unavailable in this view. The server will still revalidate
+                both mandates before recording the final approval.
+              </p>
+            ) : (
+              <dl className="mt-3 grid gap-3 text-sm sm:grid-cols-2">
+                {ownerMandatesForReview.map((mandate) => (
+                  <div key={mandate.id} className="border border-orange-200 bg-white p-3">
+                    <dt className="font-semibold">{mandate.title}</dt>
+                    <dd className="mt-1 text-mp-medium-grey">
+                      Status: {mandate.status} · Agent: {mandate.authorizedAgentId}
+                    </dd>
+                    <dd className="mt-1 text-mp-medium-grey">
+                      Limit: {formatMinorAmount(mandate.spendingLimitMinor, mandate.currency)}
+                    </dd>
+                    <dd className="mt-1 text-mp-medium-grey">
+                      Available: {formatMinorAmount(
+                        mandate.spendingLimitMinor - mandate.spentAmountMinor - mandate.reservedAmountMinor,
+                        mandate.currency,
+                      )}
+                    </dd>
+                    <dd className="mt-1 text-mp-medium-grey">
+                      This offer: {currentOffer
+                        ? formatMinorAmount(currentOffer.terms.amountMinor, currentOffer.terms.currency)
+                        : 'No offer'}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+            )}
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <Button type="button" disabled={busy} onClick={() => void reviewOwnerApproval('approve')}>
+              <Check size={16} aria-hidden="true" /> {busy ? 'Recording…' : 'Approve terms'}
+            </Button>
+            <form onSubmit={rejectAsOwner} className="flex flex-wrap items-end gap-2">
+              <label>
+                <span className="mp-label">Rejection reason</span>
+                <input name="reason" required maxLength={1000} className="mp-input mt-1 min-w-64" />
+              </label>
+              <Button type="submit" variant="outline" disabled={busy}>
+                <X size={16} aria-hidden="true" /> Reject terms
+              </Button>
+            </form>
+          </div>
+        </section>
+      )}
 
       {canCounter && (
         <section className="border border-mp-warm-grey bg-mp-surface p-5 sm:p-7">
@@ -669,11 +792,15 @@ export function NegotiationDetail({ negotiationId }: Props) {
                   <span className="absolute -left-[1.65rem] top-2 h-2.5 w-2.5 rounded-full bg-mp-orange" aria-hidden="true" />
                   <p className="font-semibold">{eventLabels[event.type] ?? event.type}</p>
                   <p className="mt-1 text-sm text-mp-medium-grey">
-                    {event.actorAgentId === user?.uid
-                      ? 'You'
-                      : event.actorAgentId === negotiation.initiatorAgentId
-                        ? negotiation.initiatorDisplayName ?? negotiation.initiatorAgentId
-                        : negotiation.recipientDisplayName ?? negotiation.recipientAgentId}
+                    {event.actorType === 'owner'
+                      ? event.actorOwnerId === user?.uid ? 'You' : 'Mandate owner'
+                      : event.actorAgentId
+                        ? event.actorAgentId === user?.uid
+                          ? 'You'
+                          : event.actorAgentId === negotiation.initiatorAgentId
+                            ? negotiation.initiatorDisplayName ?? negotiation.initiatorAgentId
+                            : negotiation.recipientDisplayName ?? negotiation.recipientAgentId
+                        : 'Mandate owner'}
                     {event.createdAt ? ` · ${new Date(event.createdAt).toLocaleString()}` : ''}
                   </p>
                   {typeof event.details?.reason === 'string' && (

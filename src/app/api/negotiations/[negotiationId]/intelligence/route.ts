@@ -66,8 +66,19 @@ export async function POST(request: Request, context: RouteContext) {
       });
       const events = eventsSnapshot.docs.map((eventSnapshot) => {
         const data = eventSnapshot.data();
-        const actorId = String(data.actorAgentId);
-        if (![negotiation.initiatorAgentId, negotiation.recipientAgentId].includes(actorId)) {
+        const agentActorId = typeof data.actorAgentId === 'string' ? data.actorAgentId : null;
+        const ownerActorId = typeof data.actorOwnerId === 'string' ? data.actorOwnerId : null;
+        if ((agentActorId === null) === (ownerActorId === null)) {
+          throw new AiRequestError(500, 'INVALID_NEGOTIATION_HISTORY', 'Negotiation event actor is invalid.');
+        }
+        const actorId = agentActorId
+          ?? (ownerActorId ? 'mandate_owner' : '');
+        const validAgentActor = actorId === 'mandate_owner'
+          || [negotiation.initiatorAgentId, negotiation.recipientAgentId].includes(actorId);
+        const validOwnerActor = ownerActorId === null
+          || (Array.isArray(negotiation.requiredOwnerApprovalIds)
+            && negotiation.requiredOwnerApprovalIds.includes(ownerActorId));
+        if (!validAgentActor || !validOwnerActor) {
           throw new AiRequestError(500, 'INVALID_NEGOTIATION_HISTORY', 'Negotiation event history is inconsistent.');
         }
         return {

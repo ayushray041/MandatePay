@@ -4,10 +4,12 @@ import { getServerTimestamp } from '@/lib/firebase/firestore';
 type EventInput = {
   sequence: number;
   type: string;
-  actorAgentId: string;
   offerId?: string;
   details?: Record<string, unknown>;
-};
+} & (
+  | { actorAgentId: string; actorOwnerId?: never }
+  | { actorOwnerId: string; actorAgentId?: never }
+);
 
 export function writeNegotiationEvent(
   transaction: Transaction,
