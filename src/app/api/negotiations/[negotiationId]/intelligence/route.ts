@@ -4,6 +4,7 @@ import { apiError, apiSuccess } from '@/lib/api/responses';
 import { createAiProvider } from '@/lib/ai/gemini';
 import { aiErrorResponse, AiRequestError } from '@/lib/ai/errors';
 import { recommendNegotiation, assessOffer } from '@/lib/ai/negotiation-recommendation';
+import { compareNegotiationOffers } from '@/lib/ai/offer-comparison';
 import { assertNegotiationParticipant, isNegotiationExpired, isNegotiationTerminal } from '@/lib/negotiations/policy';
 import { NegotiationError } from '@/lib/negotiations/errors';
 import { negotiationIntelligenceRequestSchema, mandateExplanationResponseSchema } from '@/models/ai';
@@ -80,9 +81,39 @@ export async function POST(request: Request, context: RouteContext) {
       return {
         sequence: Number(data.sequence),
         submittedByAgentId: String(data.submittedByAgentId),
+        mandateId: String(data.mandateId),
         terms: terms as NegotiationOfferTerms,
       };
     });
+    if (parsed.data.action === 'compare') {
+      const validOffers = offers.filter((offer) => (
+        (offer.submittedByAgentId === negotiation.initiatorAgentId
+          && offer.mandateId === negotiation.initiatorMandateId)
+        || (offer.submittedByAgentId === negotiation.recipientAgentId
+          && offer.mandateId === negotiation.recipientMandateId)
+      ));
+      if (validOffers.length !== offers.length) {
+        throw new AiRequestError(500, 'INVALID_NEGOTIATION_HISTORY', 'Negotiation offer history is inconsistent.');
+      }
+      const uniqueAgentIds = [...new Set(validOffers.map((offer) => offer.submittedByAgentId))];
+      const uniqueMandateIds = [...new Set(validOffers.map((offer) => offer.mandateId))];
+      const [agents, mandates] = await Promise.all([
+        Promise.all(uniqueAgentIds.map(async (id) => [id, (await firestore.collection('agents').doc(id).get()).data() ?? null] as const)),
+        Promise.all(uniqueMandateIds.map(async (id) => [id, (await firestore.collection('mandates').doc(id).get()).data() ?? null] as const)),
+      ]);
+      const agentById = new Map(agents);
+      const mandateById = new Map(mandates);
+      return apiSuccess(await compareNegotiationOffers(createAiProvider(), {
+        offers: validOffers.map((offer) => ({
+          ...offer,
+          mandate: mandateById.get(offer.mandateId) ?? null,
+          agent: agentById.get(offer.submittedByAgentId) ?? null,
+        })),
+        agentId: authentication.user.uid,
+        now: new Date(),
+      }));
+    }
+
     const currentOffer = negotiation.currentOffer
       ? negotiationOfferTermsSchema.parse(negotiation.currentOffer.terms) as NegotiationOfferTerms
       : null;

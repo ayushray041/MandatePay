@@ -5,6 +5,7 @@ import {
 
 export const negotiationIntelligenceRequestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('recommend') }).strict(),
+  z.object({ action: z.literal('compare') }).strict(),
   z.object({
     action: z.literal('explain_violation'),
     terms: negotiationOfferTermsSchema,
