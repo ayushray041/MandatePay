@@ -88,7 +88,10 @@ export const mandateCreateSchema = mandateFieldsSchema.superRefine(
 );
 export const mandateUpdateSchema = mandateFieldsSchema
   .partial()
-  .superRefine(validateMandateDatesAndLimits);
+  .superRefine(validateMandateDatesAndLimits)
+  .refine((mandate) => Object.keys(mandate).length > 0, {
+    message: 'At least one mandate field must be provided.',
+  });
 
 export const mandateLifecycleActionSchema = z
   .object({
