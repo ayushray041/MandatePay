@@ -1,14 +1,8 @@
-import { z } from 'zod';
 import { NextResponse } from 'next/server';
 import { adminFirestore } from '@/lib/firebase/admin';
 import { verifyIdToken } from '@/lib/firebase/verify-token';
 import { FieldValue } from 'firebase-admin/firestore';
-
-const profileSchema = z.object({
-  displayName: z.string().trim().min(1).max(100),
-});
-
-const updateProfileSchema = profileSchema.partial();
+import { profileCreateSchema, profileUpdateSchema } from '@/models/user';
 
 export async function GET(request: Request) {
   const authHeader = request.headers.get('Authorization');
@@ -59,7 +53,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const parsed = profileSchema.safeParse(body);
+  const parsed = profileCreateSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
       { error: 'Invalid body', details: parsed.error.issues.map((issue) => issue.message) },
@@ -83,11 +77,27 @@ export async function POST(request: Request) {
     uid,
     email,
     displayName: parsed.data.displayName,
+    role: parsed.data.role,
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   };
 
-  await userRef.set(data, { merge: true });
+  try {
+    await userRef.create(data);
+  } catch (error: unknown) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'code' in error &&
+      (error.code === 6 || error.code === 'already-exists')
+    ) {
+      return NextResponse.json({ error: 'Profile already exists' }, { status: 409 });
+    }
+
+    console.error('Failed to create Firebase user profile.', error);
+    return NextResponse.json({ error: 'Profile could not be created' }, { status: 500 });
+  }
+
   const createdProfile = await userRef.get();
   return NextResponse.json(createdProfile.data(), { status: 201 });
 }
@@ -112,7 +122,7 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
   }
 
-  const parsed = updateProfileSchema.safeParse(body);
+  const parsed = profileUpdateSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json(
       { error: 'Invalid body', details: parsed.error.issues.map((issue) => issue.message) },
@@ -141,4 +151,3 @@ export async function PATCH(request: Request) {
   const updatedSnapshot = await userRef.get();
   return NextResponse.json(updatedSnapshot.data());
 }
-

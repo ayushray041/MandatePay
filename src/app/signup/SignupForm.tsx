@@ -11,10 +11,11 @@ import { getAuthErrorMessage } from '@/lib/firebase/auth-errors';
 
 const schema = z
   .object({
-    fullName: z.string().min(1, 'Full name required'),
-    email: z.string().email('Invalid email'),
+    fullName: z.string().trim().min(1, 'Full name required').max(100, 'Name is too long'),
+    email: z.string().trim().email('Invalid email'),
     password: z.string().min(6, 'Password must be at least 6 chars'),
     confirmPassword: z.string(),
+    role: z.enum(['client', 'freelancer']),
   })
   .refine((data) => data.password === data.confirmPassword, {
     message: 'Passwords do not match',
@@ -36,6 +37,7 @@ export function SignupForm() {
       email: String(formData.get('email') ?? ''),
       password: String(formData.get('password') ?? ''),
       confirmPassword: String(formData.get('confirmPassword') ?? ''),
+      role: String(formData.get('role') ?? 'client'),
     };
 
     const parsed = schema.safeParse(payload);
@@ -61,7 +63,10 @@ export function SignupForm() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ displayName: parsed.data.fullName }),
+        body: JSON.stringify({
+          displayName: parsed.data.fullName,
+          role: parsed.data.role,
+        }),
       });
 
       if (!response.ok) {
@@ -137,6 +142,21 @@ export function SignupForm() {
               className="mp-input mt-1"
               disabled={loading}
             />
+          </div>
+          <div>
+            <label className="mp-label" htmlFor="role">
+              I am joining as a
+            </label>
+            <select
+              id="role"
+              name="role"
+              defaultValue="client"
+              className="mp-input mt-1"
+              disabled={loading}
+            >
+              <option value="client">Client</option>
+              <option value="freelancer">Freelancer</option>
+            </select>
           </div>
           <div>
             <label className="mp-label" htmlFor="password">
