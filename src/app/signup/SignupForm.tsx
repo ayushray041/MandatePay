@@ -9,6 +9,7 @@ import { ArrowRight, FileCheck2 } from 'lucide-react';
 import { Button } from '@/components/ui/Button';
 import { getAuthErrorMessage } from '@/lib/firebase/auth-errors';
 import { getApiErrorMessage } from '@/lib/api/client-errors';
+import { useAuth } from '@/components/providers/AuthProvider';
 
 const schema = z
   .object({
@@ -25,6 +26,7 @@ const schema = z
 
 export function SignupForm() {
   const router = useRouter();
+  const { refreshProfile } = useAuth();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -77,6 +79,7 @@ export function SignupForm() {
         );
       }
 
+      await refreshProfile();
       router.push('/dashboard');
     } catch (caughtError: unknown) {
       setError(getAuthErrorMessage(caughtError, 'Profile creation failed'));

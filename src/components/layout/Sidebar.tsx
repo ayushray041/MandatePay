@@ -14,22 +14,44 @@ import {
   Store,
   Wallet,
 } from 'lucide-react';
+import { useAuth } from '@/components/providers/AuthProvider';
 
-const links = [
+const clientLinks = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { href: '/projects', label: 'Projects', icon: BriefcaseBusiness },
-  { href: '/contracts', label: 'Contracts', icon: FileText },
+  { href: '/mandates', label: 'Mandates', icon: ShieldCheck },
   { href: '/negotiations', label: 'Negotiations', icon: ArrowLeftRight },
+  { href: '/contracts', label: 'Contracts', icon: FileText },
   { href: '/amendments', label: 'Amendments', icon: FileCheck2 },
   { href: '/payments', label: 'Payments', icon: Wallet },
-  { href: '/mandates', label: 'Mandates', icon: ShieldCheck },
+  { href: '/marketplace', label: 'Marketplace', icon: Store },
+];
+
+const freelancerLinks = [
+  { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { href: '/negotiations', label: 'Work Requests & Proposals', icon: ArrowLeftRight },
+  { href: '/contracts', label: 'Contracts', icon: FileText },
+  { href: '/payments', label: 'Earnings & Payments', icon: Wallet },
+  { href: '/mandates', label: 'My Mandates', icon: ShieldCheck },
+  { href: '/marketplace', label: 'Service Directory', icon: Store },
+  { href: '/agents', label: 'Agent Profile', icon: Bot },
+  { href: '/workflows', label: 'Workflows', icon: GitBranch },
+];
+
+const adminLinks = [
+  ...clientLinks,
+  { href: '/projects', label: 'Projects', icon: BriefcaseBusiness },
   { href: '/workflows', label: 'Workflows', icon: GitBranch },
   { href: '/agents', label: 'Agent Management', icon: Bot },
-  { href: '/marketplace', label: 'Marketplace', icon: Store },
 ];
 
 export const Sidebar: React.FC = () => {
   const pathname = usePathname();
+  const { profile } = useAuth();
+  const links = profile?.role === 'client'
+    ? clientLinks
+    : profile?.role === 'freelancer'
+      ? freelancerLinks
+      : adminLinks;
 
   return (
     <aside className="hidden w-60 shrink-0 border-r border-mp-warm-grey bg-mp-app-bg md:flex md:flex-col">

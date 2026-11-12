@@ -71,6 +71,25 @@ export async function POST(request: Request) {
     return authentication.response;
   }
 
+  if (!adminFirestore) {
+    return apiError(503, 'SERVICE_UNAVAILABLE', 'Mandate storage is unavailable.');
+  }
+
+  const { uid } = authentication.user;
+  const firestore = adminFirestore;
+  try {
+    const ownerProfile = await firestore.collection('users').doc(uid).get();
+    if (!ownerProfile.exists) {
+      return apiError(404, 'PROFILE_NOT_FOUND', 'Create a user profile before creating a mandate.');
+    }
+    if (ownerProfile.data()?.role !== 'client') {
+      return apiError(403, 'CLIENT_ROLE_REQUIRED', 'A client profile is required to create a mandate.');
+    }
+  } catch (error: unknown) {
+    console.error('Failed to validate mandate owner role.', error);
+    return apiError(500, 'INTERNAL_ERROR', 'Mandate owner authorization could not be verified.');
+  }
+
   let body: unknown;
   try {
     body = await request.json();
@@ -88,7 +107,6 @@ export async function POST(request: Request) {
     );
   }
 
-  const { uid } = authentication.user;
   if (parsed.data.authorizedAgentId === uid) {
     return apiError(
       400,
@@ -96,11 +114,6 @@ export async function POST(request: Request) {
       'The authorized agent must be a different account from the owner.',
     );
   }
-
-  if (!adminFirestore) {
-    return apiError(503, 'SERVICE_UNAVAILABLE', 'Mandate storage is unavailable.');
-  }
-  const firestore = adminFirestore;
 
   try {
     const approvalRequirements = parsed.data.approvalRequirements;
@@ -123,6 +136,13 @@ export async function POST(request: Request) {
         422,
         'INVALID_USER',
         'The authorized agent and every approver must have a registered user profile.',
+      );
+    }
+    if (profiles[0]?.data()?.role !== 'freelancer') {
+      return apiError(
+        422,
+        'INVALID_AGENT_ROLE',
+        'The authorized agent must have a freelancer profile.',
       );
     }
 

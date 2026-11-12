@@ -7,17 +7,32 @@ import { useState } from 'react';
 import { useAuth } from '@/components/providers/AuthProvider';
 import { getAuthErrorMessage } from '@/lib/firebase/auth-errors';
 
-const links = [
+const clientLinks = [
   { href: '/dashboard', label: 'Dashboard' },
-  { href: '/projects', label: 'Projects' },
-  { href: '/contracts', label: 'Contracts' },
+  { href: '/mandates', label: 'Mandates' },
   { href: '/negotiations', label: 'Negotiations' },
+  { href: '/contracts', label: 'Contracts' },
   { href: '/amendments', label: 'Amendments' },
   { href: '/payments', label: 'Payments' },
-  { href: '/mandates', label: 'Mandates' },
+  { href: '/marketplace', label: 'Marketplace' },
+];
+
+const freelancerLinks = [
+  { href: '/dashboard', label: 'Dashboard' },
+  { href: '/negotiations', label: 'Work Requests & Proposals' },
+  { href: '/contracts', label: 'Contracts' },
+  { href: '/payments', label: 'Earnings & Payments' },
+  { href: '/mandates', label: 'My Mandates' },
+  { href: '/marketplace', label: 'Service Directory' },
+  { href: '/agents', label: 'Agent Profile' },
+  { href: '/workflows', label: 'Workflows' },
+];
+
+const adminLinks = [
+  ...clientLinks,
+  { href: '/projects', label: 'Projects' },
   { href: '/workflows', label: 'Workflows' },
   { href: '/agents', label: 'Agent Management' },
-  { href: '/marketplace', label: 'Marketplace' },
 ];
 
 export const Header: React.FC = () => {
@@ -25,7 +40,12 @@ export const Header: React.FC = () => {
   const [logoutError, setLogoutError] = useState<string | null>(null);
   const [loggingOut, setLoggingOut] = useState(false);
   const pathname = usePathname();
-  const { user, logout } = useAuth();
+  const { user, profile, logout } = useAuth();
+  const links = profile?.role === 'client'
+    ? clientLinks
+    : profile?.role === 'freelancer'
+      ? freelancerLinks
+      : adminLinks;
 
   const handleLogout = async () => {
     setLoggingOut(true);

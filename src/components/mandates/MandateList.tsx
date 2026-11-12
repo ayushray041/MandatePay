@@ -28,7 +28,8 @@ function spendingPercent(mandate: MandateRecord): number {
 }
 
 export function MandateList() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
+  const canCreateMandate = profile?.role === 'client' || profile?.role === 'admin';
   const [mandates, setMandates] = useState<MandateRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -80,13 +81,15 @@ export function MandateList() {
             and approval limits.
           </p>
         </div>
-        <Link
-          href="/mandates/new"
-          className="inline-flex min-h-11 items-center justify-center gap-2 self-start bg-mp-orange px-4 text-sm font-semibold text-mp-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mp-orange sm:self-auto"
-        >
-          <Plus size={17} aria-hidden="true" />
-          Create mandate
-        </Link>
+        {canCreateMandate && (
+          <Link
+            href="/mandates/new"
+            className="inline-flex min-h-11 items-center justify-center gap-2 self-start bg-mp-orange px-4 text-sm font-semibold text-mp-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-mp-orange sm:self-auto"
+          >
+            <Plus size={17} aria-hidden="true" />
+            Create mandate
+          </Link>
+        )}
       </header>
 
       {loading ? (
@@ -106,15 +109,18 @@ export function MandateList() {
           <ShieldCheck size={26} className="text-mp-orange" aria-hidden="true" />
           <h2 className="mt-4 text-xl font-semibold">No mandates yet</h2>
           <p className="mp-copy mt-2 max-w-lg">
-            Create a mandate to define an agent’s permitted operations, spending authority, and
-            approval rules. No sample mandates are shown.
+            {canCreateMandate
+              ? 'Create a mandate to define an agent’s permitted operations, spending authority, and approval rules. No sample mandates are shown.'
+              : 'Mandates assigned to or approved by your account will appear here. No sample mandates are shown.'}
           </p>
-          <Link
-            href="/mandates/new"
-            className="mt-5 inline-flex min-h-10 items-center gap-2 font-semibold text-mp-ink underline decoration-mp-orange decoration-2 underline-offset-4"
-          >
-            Create a mandate <ArrowRight size={16} aria-hidden="true" />
-          </Link>
+          {canCreateMandate && (
+            <Link
+              href="/mandates/new"
+              className="mt-5 inline-flex min-h-10 items-center gap-2 font-semibold text-mp-ink underline decoration-mp-orange decoration-2 underline-offset-4"
+            >
+              Create a mandate <ArrowRight size={16} aria-hidden="true" />
+            </Link>
+          )}
         </div>
       ) : (
         <div className="grid gap-4">

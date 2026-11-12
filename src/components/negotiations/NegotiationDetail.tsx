@@ -52,7 +52,7 @@ const eventLabels: Record<string, string> = {
 type Props = { negotiationId: string };
 
 export function NegotiationDetail({ negotiationId }: Props) {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const [detail, setDetail] = useState<NegotiationDetailData | null>(null);
   const [mandates, setMandates] = useState<MandateRecord[]>([]);
   const [agent, setAgent] = useState<AgentProfile | null>(null);
@@ -76,7 +76,7 @@ export function NegotiationDetail({ negotiationId }: Props) {
       const [nextDetail, nextMandates, nextAgent] = await Promise.all([
         getNegotiation(negotiationId),
         listMandates(),
-        getMyAgentProfile(),
+        profile?.role === 'freelancer' ? getMyAgentProfile() : Promise.resolve(null),
       ]);
       setDetail(nextDetail);
       setMandates(nextMandates);
@@ -89,14 +89,14 @@ export function NegotiationDetail({ negotiationId }: Props) {
         setLoading(false);
       }
     }
-  }, [negotiationId]);
+  }, [negotiationId, profile]);
 
   useEffect(() => {
     let active = true;
     void Promise.all([
       getNegotiation(negotiationId),
       listMandates(),
-      getMyAgentProfile(),
+      profile?.role === 'freelancer' ? getMyAgentProfile() : Promise.resolve(null),
     ])
       .then(([nextDetail, nextMandates, nextAgent]) => {
         if (!active) {
@@ -120,7 +120,7 @@ export function NegotiationDetail({ negotiationId }: Props) {
     return () => {
       active = false;
     };
-  }, [negotiationId]);
+  }, [negotiationId, profile]);
 
   const participantRole = detail?.negotiation.initiatorAgentId === user?.uid
     ? 'initiator'

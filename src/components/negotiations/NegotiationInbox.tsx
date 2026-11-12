@@ -44,7 +44,7 @@ const strategyPriorities: NegotiationStrategyProfile['priorities'] = [
 
 export function NegotiationInbox() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, profile: userProfile } = useAuth();
   const [agentProfile, setAgentProfile] = useState<AgentProfile | null>(null);
   const [agents, setAgents] = useState<AgentDiscoveryProfile[]>([]);
   const [mandates, setMandates] = useState<MandateRecord[]>([]);
@@ -62,14 +62,14 @@ export function NegotiationInbox() {
 
   const load = useCallback(async () => {
     try {
-      const [profile, discoveredAgents, activeMandates, inbox] = await Promise.all([
-        getMyAgentProfile(),
-        discoverAgents(category || undefined),
+      const [nextAgentProfile, discoveredAgents, activeMandates, inbox] = await Promise.all([
+        userProfile?.role === 'freelancer' ? getMyAgentProfile() : Promise.resolve(null),
+        userProfile?.role === 'freelancer' ? discoverAgents(category || undefined) : Promise.resolve([]),
         listMandates(),
         listNegotiations(),
       ]);
       setError(null);
-      setAgentProfile(profile);
+      setAgentProfile(nextAgentProfile);
       setAgents(discoveredAgents);
       setMandates(activeMandates);
       setNegotiations(inbox);
@@ -79,9 +79,13 @@ export function NegotiationInbox() {
     } finally {
       setLoading(false);
     }
-  }, [category]);
+  }, [category, userProfile]);
 
   useEffect(() => {
+    if (userProfile?.role !== 'freelancer') {
+      return;
+    }
+
     let active = true;
     Promise.all([getNegotiationStrategy(), getNegotiationAnalytics()])
       .then(([profile, summary]) => {
@@ -98,13 +102,13 @@ export function NegotiationInbox() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [userProfile]);
 
   useEffect(() => {
     let active = true;
     Promise.all([
-      getMyAgentProfile(),
-      discoverAgents(category || undefined),
+      userProfile?.role === 'freelancer' ? getMyAgentProfile() : Promise.resolve(null),
+      userProfile?.role === 'freelancer' ? discoverAgents(category || undefined) : Promise.resolve([]),
       listMandates(),
       listNegotiations(),
     ])
@@ -132,7 +136,7 @@ export function NegotiationInbox() {
     return () => {
       active = false;
     };
-  }, [category]);
+  }, [category, userProfile]);
 
   const availableMandates = mandates.filter((mandate) => (
     mandate.authorizedAgentId === user?.uid
@@ -231,10 +235,12 @@ export function NegotiationInbox() {
     <section className="mp-page mx-auto w-full max-w-7xl space-y-8">
       <header className="flex flex-col justify-between gap-5 border-b border-mp-warm-grey pb-6 sm:flex-row sm:items-end">
         <div>
-          <p className="mp-kicker">Agent-to-agent commerce</p>
+          <p className="mp-kicker">{userProfile?.role === 'client' ? 'Mandate owner approvals' : 'Agent-to-agent commerce'}</p>
           <h1 className="mp-page-title mt-2">Negotiations</h1>
           <p className="mp-copy mt-3 max-w-2xl">
-            Exchange service offers and counteroffers within each agent’s active mandate.
+            {userProfile?.role === 'client'
+              ? 'Review negotiation offers that are explicitly awaiting your mandate-owner approval.'
+              : 'Exchange service offers and counteroffers within each agent’s active mandate.'}
           </p>
         </div>
         <Button type="button" variant="outline" onClick={refresh} disabled={loading}>
@@ -304,7 +310,12 @@ export function NegotiationInbox() {
         </p>
       ) : (
         <>
-          {!agentProfile ? (
+          {userProfile?.role === 'client' ? (
+            <div className="border-l-2 border-mp-orange bg-mp-surface px-4 py-3 text-sm">
+              This view contains only negotiations the server has authorized your account to review.
+              New negotiation requests are created by participating freelancer agents.
+            </div>
+          ) : !agentProfile ? (
             <div className="space-y-5">
               {hasOwnerApprovalTasks && (
                 <p className="border-l-2 border-mp-orange bg-mp-surface px-4 py-3 text-sm">
