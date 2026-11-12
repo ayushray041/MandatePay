@@ -129,6 +129,20 @@ export async function POST(request: Request, context: RouteContext) {
       const hasAuthorization =
         typeof payment.providerAuthorizationId === 'string'
         && payment.providerAuthorizationId.length > 0;
+      const hasProviderOrder =
+        typeof payment.providerOrderId === 'string'
+        && payment.providerOrderId.length > 0;
+      if (
+        hasProviderOrder
+        && !hasAuthorization
+        && payment.failureCode !== 'PAYMENT_AUTHORIZATION_DENIED'
+      ) {
+        throw new PaymentError(
+          409,
+          'PAYMENT_ORDER_CANCELLATION_UNAVAILABLE',
+          'An unapproved provider order cannot be safely cancelled yet. Complete or decline checkout before releasing its reservation.',
+        );
+      }
       if (hasAuthorization && !isPayPalConfigured()) {
         throw new PaymentError(503, 'PAYMENT_PROVIDER_UNAVAILABLE', 'Sandbox payment provider is not configured.');
       }

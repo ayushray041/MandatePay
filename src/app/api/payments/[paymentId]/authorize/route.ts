@@ -59,7 +59,12 @@ export async function POST(request: Request, context: RouteContext) {
       if (
         payment.status !== 'pending'
         && !(payment.status === 'processing' && payment.pendingOperation === 'authorize')
-        && !(payment.status === 'failed' && payment.providerOrderId && !payment.providerAuthorizationId)
+        && !(
+          payment.status === 'failed'
+          && payment.providerOrderId
+          && !payment.providerAuthorizationId
+          && payment.failureCode !== 'PAYMENT_AUTHORIZATION_DENIED'
+        )
       ) {
         throw new PaymentError(409, 'PAYMENT_NOT_AUTHORIZABLE', 'Payment is not ready for provider authorization.');
       }
@@ -157,7 +162,7 @@ export async function POST(request: Request, context: RouteContext) {
       transaction.update(paymentRef, {
         status,
         pendingOperation: authorized || denied ? null : 'authorize',
-        providerAuthorizationId: providerResult.authorizationId,
+        providerAuthorizationId: denied ? null : providerResult.authorizationId,
         ...(authorized ? { authorizedAt: timestamp, failureCode: null } : {}),
         ...(denied ? { failureCode: 'PAYMENT_AUTHORIZATION_DENIED' } : {}),
         eventCount: eventCount + 1,
@@ -170,7 +175,7 @@ export async function POST(request: Request, context: RouteContext) {
         actorId: uid,
         details: {
           operation: 'authorize',
-          providerAuthorizationId: providerResult.authorizationId,
+          providerAuthorizationId: denied ? null : providerResult.authorizationId,
           providerStatus: providerResult.status,
         },
       });
@@ -178,7 +183,7 @@ export async function POST(request: Request, context: RouteContext) {
         ...payment,
         status,
         pendingOperation: authorized || denied ? null : 'authorize',
-        providerAuthorizationId: providerResult.authorizationId,
+        providerAuthorizationId: denied ? null : providerResult.authorizationId,
         ...(authorized ? { authorizedAt: new Date(), failureCode: null } : {}),
         ...(denied ? { failureCode: 'PAYMENT_AUTHORIZATION_DENIED' } : {}),
         eventCount: eventCount + 1,

@@ -35,6 +35,7 @@ vi.mock('@/lib/payments/paypal', () => ({
 
 import { POST as createPayment } from '@/app/api/payments/route';
 import { POST as authorizePayment } from '@/app/api/payments/[paymentId]/authorize/route';
+import { POST as cancelPayment } from '@/app/api/payments/[paymentId]/cancel/route';
 
 function reference(path: string) {
   const segments = path.split('/');
@@ -178,5 +179,27 @@ describe('payment APIs', () => {
 
     expect(response.status).toBe(403);
     expect(mocks.assertPaymentMatchesContract).not.toHaveBeenCalled();
+  });
+
+  it('does not release reservations for an unapproved provider order', async () => {
+    mocks.documents.set('payments/contract-1', {
+      participantIds: ['payer', 'payee'],
+      payerId: 'payer',
+      payeeId: 'payee',
+      status: 'pending',
+      providerOrderId: 'sandbox-order-1',
+      providerAuthorizationId: null,
+    });
+
+    const response = await cancelPayment(
+      jsonRequest({ reason: 'No longer needed' }),
+      { params: Promise.resolve({ paymentId: 'contract-1' }) },
+    );
+
+    expect(response.status).toBe(409);
+    expect(mocks.documents.get('payments/contract-1')).toMatchObject({
+      status: 'pending',
+      providerOrderId: 'sandbox-order-1',
+    });
   });
 });

@@ -93,6 +93,32 @@
 - `npm run test:rules`: could not start the emulator because the installed Firebase CLI requires JDK 21 or newer. The rules tests remain skipped without `FIRESTORE_EMULATOR_HOST`.
 
 ### Scope and remaining work
-- Contract generation records accepted workflow terms; it does not claim legal enforceability, create digital signatures, or authorize/process payment.
+- Contract generation records accepted workflow terms; it does not claim legal enforceability, create digital signatures, or itself authorize/process payment. Payment execution is a separate Phase 5 system.
 - No live Firebase project operations or rules deployment were performed. Deploy the current rules and indexes to an authorized project before rollout.
-- Payment execution, contract intelligence, and webhook integrations remain future work.
+- Contract intelligence remains future work.
+
+## Phase 5: Secure payment infrastructure
+
+### Completed
+- Added a strict payment model, lifecycle event model, and sandbox-only PayPal Server SDK adapter. Provider amounts are created from server-derived integer minor units, and provider responses are checked before being persisted.
+- Implemented participant-scoped payment history and detail APIs, server-calculated initiation from an active approved contract, payer authorization, fulfillment-confirmed capture, cancellation/void, and full-refund operations.
+- Added transaction-safe reservation consumption/release and refund ledger reversal. Provider calls use stable operation-specific request IDs and idempotent retries; a new request key starts a fresh cycle only after cancellation.
+- Added PayPal signature verification through the fixed sandbox verification endpoint, durable hashed webhook-event receipts, transactional capture/refund/void reconciliation, and fail-closed handling for invalid signatures, unmatched records, and amount/state conflicts.
+- Added server-only Firestore rules for payments, payment events, and webhook receipts, plus the composite participant/updated-time index for transaction history.
+- Replaced the payment placeholder with authenticated transaction history, eligible contract initiation, sandbox checkout return handling, payment details, state/timeline display, authorization/capture/cancel/refund actions, retry paths, and explicit loading/error/empty states.
+- Updated the API contracts, architecture, and database schema documentation. The UI displays a provider receipt only when a validated HTTPS PayPal receipt URL is present; no receipt is fabricated.
+
+### Verification
+- `npm test`: passed — 20 test files passed, 1 skipped; 91 tests passed, 3 skipped.
+- `npx tsc --noEmit`: passed.
+- `npm run lint`: passed.
+- `npm run build`: passed; generated `/payments`, `/payments/[paymentId]`, and all payment API routes.
+- `firestore.indexes.json` JSON validation and `git diff --check`: passed.
+- The Firestore rules test file was skipped because `FIRESTORE_EMULATOR_HOST` is not configured. The Phase 3 section records the known JDK 21 requirement for the local emulator.
+
+### Scope and remaining work
+- The adapter is pinned to PayPal sandbox and no real payments or live provider calls were made. Sandbox credential and webhook registration must be configured and verified in an authorized environment before rollout.
+- PayPal does not provide a safe server-side cancellation operation for an order that has not yet been authorized. Such orders retain their mandate reservations until the order is approved/declined and reconciled; there is no scheduled order-expiry recovery worker in this phase.
+- Direct client Firestore access remains denied; deploy the current Firestore rules and indexes to the authorized Firebase project.
+- npm reported 24 dependency audit findings during the PayPal SDK installation (19 moderate and 5 high); dependency audit remediation was not part of this phase.
+- Provider-supported receipt presentation is conditional; this integration does not manufacture receipts or guarantee availability.

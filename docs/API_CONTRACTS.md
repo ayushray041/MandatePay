@@ -113,16 +113,34 @@ currency/category, mandate expiry, and capacity after accounting for the existin
 Any approved amount delta is applied to both mandate reservations in the same transaction that
 creates the next contract version.
 
-### Planned payment APIs
+### Payments
 
-The following routes are documented as future work and are not implemented:
+Payment routes require a verified Firebase ID token except for the PayPal webhook, which verifies
+the provider signature before processing. Payment amounts and parties are read from the current
+approved contract version and server-owned mandate reservations; clients cannot submit an amount.
+PayPal is pinned to its sandbox environment.
 
-| Method | Path | Planned purpose |
-|--------|------|-----------------|
-| POST | `/api/payments` | Create a PayPal authorization order. |
-| POST | `/api/payments/:id/capture` | Capture authorized funds. |
-| POST | `/api/payments/:id/void` | Void an uncaptured order. |
-| POST | `/api/webhooks/paypal` | Verify PayPal webhook signatures and process events. |
+| Method | Path | Request | Response / notes |
+|--------|------|---------|------------------|
+| GET | `/api/payments` | – | Lists up to 50 payments involving the caller. |
+| POST | `/api/payments` | `{ contractId }` and `Idempotency-Key` header | Creates or safely retries one sandbox authorization order for an active, approved contract. The verified payer must be the contract client. |
+| GET | `/api/payments/:paymentId` | – | Participant-only payment record and append-only event history. |
+| POST | `/api/payments/:paymentId/authorize` | – | Confirms the PayPal authorization against the server-owned order and approved amount. |
+| POST | `/api/payments/:paymentId/capture` | `{ fulfillmentConfirmed: true }` | Requests provider capture after payer confirmation; only a verified provider result or webhook marks completion. |
+| POST | `/api/payments/:paymentId/cancel` | `{ reason }` | Voids an authorization before transactionally releasing both mandate reservations. An unapproved provider order cannot be canceled or have its reservation released. |
+| POST | `/api/payments/:paymentId/refund` | `{ reason }` | Requests a full refund of a provider-confirmed capture. Spending is reversed only on provider confirmation. |
+| POST | `/api/payments/webhook` | Raw PayPal event JSON and transmission headers | Verifies the event through PayPal's sandbox signature-verification API, then processes supported authorization, capture, void, and refund events transactionally. Event IDs are durably deduplicated. |
+
+Payment status is one of `created`, `pending`, `authorized`, `processing`, `completed`, `failed`,
+`cancelled`, or `refunded`. Provider operations use stable idempotency request IDs; webhook updates
+and mandate-ledger changes are committed in the same Firestore transaction. A canceled payment can
+start a new cycle with a new idempotency key. Only full refunds are implemented. Unsupported or
+unmatched verified events are not applied to a payment; unmatched events receive a retryable service
+error. A browser redirect or client-reported success never marks a payment completed.
+
+Provider credentials are server-only. Configure sandbox `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`,
+`PAYPAL_WEBHOOK_ID`, and `APP_BASE_URL`; sandbox mode is fixed in the server adapter. No live
+financial transactions are initiated by this integration.
 
 ### Error handling
 

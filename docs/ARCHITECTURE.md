@@ -23,6 +23,11 @@ Zod, and performs authorized Firestore operations with the Firebase Admin SDK.
    The contract records the parties, mandates, agreed service and conditions. All required parties
    must approve before activation. Amendments are reviewed against current mandate authority and
    produce immutable versions with append-only audit events.
+6. **Sandbox payments** — an approved active contract can start a PayPal sandbox authorization
+   order. Server APIs calculate the amount from the approved version, check both reservations, and
+   manage authorization, capture, cancellation, and full-refund transitions. Verified provider
+   webhooks reconcile payment state and mandate ledgers transactionally; durable event receipts
+   prevent duplicate processing.
 
 ### Negotiation and budget guarantees
 
@@ -48,6 +53,24 @@ Zod, and performs authorized Firestore operations with the Firebase Admin SDK.
   roots, versions, amendments, and audit events.
 - Contract output records workflow terms; it does not claim legal enforceability, provide legal
   advice, create a digital signature, or authorize/process payment.
+- Payment initiation consumes the existing accepted-contract reservation; it does not reserve the
+  amount a second time. Capture transactionally consumes both reservations and adds spending to
+  the payer mandate only after PayPal confirms completion. Cancellation releases both reservations
+  only when no provider order exists or provider authorization is confirmed void. An unapproved
+  PayPal order cannot be safely canceled server-side and retains its reservation. Full refunds
+  reverse payer spending only after provider confirmation.
+- Provider calls run outside Firestore transactions and use stable operation-specific idempotency
+  identifiers. Firestore transactions reserve/transition state before calls and reconcile results
+  afterward, allowing safe retries without duplicate ledger changes.
+- Webhook signatures are verified by the PayPal sandbox API. Processed event IDs are stored as
+  hashed receipt document IDs in the same transaction as payment/ledger updates. Unmatched events
+  remain retryable; amount, currency, authorization, and state mismatches are never treated as
+  successful payment.
+- Browser redirects and user confirmation can request an operation but cannot mark a payment
+  complete. The protected APIs derive amounts from approved contract data and verify provider
+  responses; Firestore rules deny all direct client access to payment and webhook records.
+- The UI displays provider receipts only when a validated HTTPS PayPal receipt URL is present. This
+  sandbox integration does not fabricate a receipt or claim that a receipt is available.
 
 ### Security considerations
 
@@ -60,9 +83,12 @@ Zod, and performs authorized Firestore operations with the Firebase Admin SDK.
   authorization, negotiation, offer, and event records.
 - All API input is validated with strict Zod schemas before business logic. Transactional state
   changes protect against duplicate decisions and budget races.
+- PayPal mode is fixed to sandbox in the server adapter; client credentials, webhook verification,
+  and provider calls are never exposed to the browser. The project has not performed real or
+  credential-backed financial transactions.
 - The client route guard is an experience feature, not an API security boundary.
 
-Contract generation and amendments are implemented. Contract intelligence, payment processing,
-and webhook integrations remain planned work. See [API_CONTRACTS.md](./API_CONTRACTS.md),
+Contract generation, amendments, and sandbox payment processing are implemented. Contract
+intelligence remains separate future work. See [API_CONTRACTS.md](./API_CONTRACTS.md),
 [DATABASE_SCHEMA.md](./DATABASE_SCHEMA.md), and [DEVELOPMENT_STATUS.md](./DEVELOPMENT_STATUS.md) for
 implementation and verification details.

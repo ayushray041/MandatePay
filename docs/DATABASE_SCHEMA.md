@@ -18,6 +18,9 @@ are accessed through authenticated server APIs only.
 | `contracts/{id}/versions` | `v1`, `v2`, ... | `contractId`, version, previous version ID, negotiation ID, optional amendment ID, creator, creation time, complete terms snapshot | Immutable contract documents. Approved amendments create a new version instead of modifying prior terms. |
 | `contracts/{id}/amendments` | Auto ID | base version, complete proposed terms, review status, required approvers, approvals, creator, rejection reason, timestamps | Amendment proposals and party decisions. |
 | `contracts/{id}/events` | Auto ID | sequence, event type, actor UID, optional amendment/version IDs and details, creation time | Append-only contract and amendment audit history. |
+| `payments` | Contract ID | `contractId`, negotiation and participant IDs, payer/payee and mandate IDs, server-derived amount/currency, provider order/authorization/capture/refund IDs, idempotency hash, status, pending operation, attempt counters, mandate approval, timestamps | One payment record per contract, with a new idempotent cycle allowed after cancellation. Secret credentials and raw webhook payloads are not stored. |
+| `payments/{contractId}/events` | Auto ID | sequence, lifecycle event, source, actor, optional provider event ID and details, `createdAt` | Append-only payment and provider activity history. |
+| `paypalWebhookEvents` | SHA-256 of provider event ID | original provider event ID, event type, processing outcome, payment ID, receive timestamp | Durable webhook idempotency receipts; does not store raw event bodies or signature headers. |
 
 Negotiation lifecycle states are `initiated`, `offer_submitted`, `counter_offered`, `accepted`,
 `rejected`, `expired`, and `cancelled`. Accepted amounts are added transactionally to
@@ -34,6 +37,7 @@ capacity and are not an execution or payment record.
 - Agent discovery by category and `updatedAt`.
 - Negotiation inbox queries by `initiatorAgentId` or `recipientAgentId`, ordered by `updatedAt`.
 - Contract participant listing by `participantIds` and `updatedAt`.
+- Payment history listing by `participantIds` and `updatedAt`.
 - Amendment reviewer listing by `requiredApproverIds` and `updatedAt`.
 
 ### Security rules
@@ -42,9 +46,9 @@ Rules in `firestore.rules`:
 
 - Allow users to read only their own profile; all profile writes go through the authenticated API.
 - Deny direct client reads and writes for agent profiles, mandates, authorizations, negotiations,
-  negotiation offers/events, contracts, contract versions, amendments, and contract events. APIs
-  perform identity, participant, and ownership checks because Firebase Admin SDK access bypasses
-  rules.
+  negotiation offers/events, contracts, contract versions, amendments, contract events, payments,
+  payment events, and webhook idempotency receipts. APIs perform identity, participant, and
+  ownership checks because Firebase Admin SDK access bypasses rules.
 - Deny all other direct client access by default.
 
 The rules are configured by `firebase.json`. Emulator-backed rules tests require
