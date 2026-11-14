@@ -1,5 +1,5 @@
-import { ContractList } from '@/components/contracts/ContractList';
+// import { ContractList } from '@/components/contracts/ContractList';
 
-export default function ContractsPage() {
-  return <ContractList />;
-}
+// export default function ContractsPage() {
+//   return <ContractList />;
+// }
